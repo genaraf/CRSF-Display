@@ -393,27 +393,27 @@ bool app_state_parse_simulator_command(const char *text, simulator_command_t *co
         return false;
     }
 
-    if (strcmp(text, "Start") == 0) {
+    if ((strcmp(text, "Start") == 0) || (strcmp(text, "start") == 0)) {
         *command = SIMULATOR_COMMAND_START;
         return true;
     }
 
-    if (strcmp(text, "Pause") == 0) {
+    if ((strcmp(text, "Pause") == 0) || (strcmp(text, "pause") == 0)) {
         *command = SIMULATOR_COMMAND_PAUSE;
         return true;
     }
 
-    if (strcmp(text, "Resume") == 0) {
+    if ((strcmp(text, "Resume") == 0) || (strcmp(text, "resume") == 0)) {
         *command = SIMULATOR_COMMAND_RESUME;
         return true;
     }
 
-    if (strcmp(text, "Stop") == 0) {
+    if ((strcmp(text, "Stop") == 0) || (strcmp(text, "stop") == 0)) {
         *command = SIMULATOR_COMMAND_STOP;
         return true;
     }
 
-    if (strcmp(text, "Reset") == 0) {
+    if ((strcmp(text, "Reset") == 0) || (strcmp(text, "reset") == 0)) {
         *command = SIMULATOR_COMMAND_RESET;
         return true;
     }

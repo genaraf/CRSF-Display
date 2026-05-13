@@ -54,11 +54,31 @@ static void load_initial_simulator_profile(void)
 {
     bootstrap_profile_state_t profile_state = {0};
     esp_err_t err;
+    bool display_locked = false;
+
+    display_locked = display_lock(250);
+    if (display_locked) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    } else {
+        ESP_LOGW(TAG, "Failed to lock display before SDCard init");
+    }
 
     err = sdcard_json_init();
+    if (display_locked) {
+        display_unlock();
+        display_locked = false;
+    }
+
     log_start_result("sdcard_json", err);
     if (err != ESP_OK) {
         return;
+    }
+
+    display_locked = display_lock(250);
+    if (display_locked) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    } else {
+        ESP_LOGW(TAG, "Failed to lock display before SD profile access");
     }
 
     app_state_read(capture_bootstrap_profile_state, &profile_state);
@@ -70,6 +90,10 @@ static void load_initial_simulator_profile(void)
 
     if (err != ESP_OK) {
         err = sdcard_json_save_profile(APP_SIMULATOR_DEFAULT_PROFILE_PATH, false);
+    }
+
+    if (display_locked) {
+        display_unlock();
     }
 
     log_start_result("simulator_profile", err);

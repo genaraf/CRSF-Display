@@ -8,8 +8,10 @@
 #include "app_config.h"
 #include "app_state.h"
 #include "cJSON.h"
+#include "display/display.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdcard/sdcard_json.h"
@@ -84,6 +86,46 @@ typedef struct {
     bool dialog_state_present;
     char dialog_state[APP_MAX_DIALOG_STATE_LEN];
 } ui_state_patch_t;
+
+typedef esp_err_t (*sdcard_locked_op_t)(void *ctx);
+
+typedef struct {
+    const char *path;
+    bool overwrite;
+} profile_save_context_t;
+
+static esp_err_t run_sdcard_locked(sdcard_locked_op_t op, void *ctx)
+{
+    bool display_locked = display_lock(250);
+    if (display_locked) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    } else {
+        ESP_LOGW(TAG, "Failed to lock display before SDCard access");
+    }
+
+    esp_err_t err = op(ctx);
+
+    if (display_locked) {
+        display_unlock();
+    }
+    return err;
+}
+
+static esp_err_t list_profiles_locked_op(void *ctx)
+{
+    return sdcard_json_list_profiles((sdcard_json_profile_list_t *) ctx);
+}
+
+static esp_err_t load_profile_locked_op(void *ctx)
+{
+    return sdcard_json_load_profile((const char *) ctx);
+}
+
+static esp_err_t save_profile_locked_op(void *ctx)
+{
+    profile_save_context_t *save_ctx = (profile_save_context_t *) ctx;
+    return sdcard_json_save_profile(save_ctx->path, save_ctx->overwrite);
+}
 
 static bool is_valid_flight_mode(const char *mode_name)
 {
@@ -422,7 +464,6 @@ static cJSON *json_create_system_state(const app_state_t *state)
     cJSON_AddItemToObject(root, "channels", json_create_channels(state));
     cJSON_AddItemToObject(root, "link_statistics", json_create_link_statistics(state));
     cJSON_AddItemToObject(root, "telemetry", json_create_telemetry_overview(state));
-    cJSON_AddItemToObject(root, "manual_telemetry", json_create_manual_telemetry(state));
     cJSON_AddItemToObject(root, "simulator", json_create_simulator(state));
     cJSON_AddItemToObject(root, "gps_status", json_create_gps_status(state));
 
@@ -456,6 +497,9 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *json, int status_code)
     payload = cJSON_PrintUnformatted(json);
     if (payload == NULL) {
         cJSON_Delete(json);
+        ESP_LOGE(TAG, "JSON serialization failed, free heap=%u, largest block=%u",
+                 (unsigned) heap_caps_get_free_size(MALLOC_CAP_8BIT),
+                 (unsigned) heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "JSON serialization failed");
         return ESP_FAIL;
     }
@@ -939,7 +983,7 @@ static esp_err_t get_profiles_handler(httpd_req_t *req)
 {
     app_state_t state;
     sdcard_json_profile_list_t profiles;
-    esp_err_t err = sdcard_json_list_profiles(&profiles);
+    esp_err_t err = run_sdcard_locked(list_profiles_locked_op, &profiles);
     if (err != ESP_OK) {
         return send_error(req, 503, "subsystem_unavailable", "SDCard is not mounted");
     }
@@ -988,12 +1032,15 @@ static esp_err_t patch_simulator_parameters_handler(httpd_req_t *req)
 {
     char *body = read_request_body(req);
     if (body == NULL) {
+        ESP_LOGW(TAG, "PATCH /api/v1/simulator/parameters: missing body");
         return send_error(req, 400, "bad_request", "Missing request body");
     }
 
+    ESP_LOGI(TAG, "PATCH /api/v1/simulator/parameters body: %s", body);
     cJSON *json = cJSON_Parse(body);
     free(body);
     if (json == NULL) {
+        ESP_LOGW(TAG, "PATCH /api/v1/simulator/parameters: invalid JSON");
         return send_error(req, 400, "bad_request", "Invalid JSON body");
     }
 
@@ -1008,9 +1055,20 @@ static esp_err_t patch_simulator_parameters_handler(httpd_req_t *req)
         !parse_int_field(json, "satellites", &patch.satellites_present, &patch.satellites) ||
         !parse_bool_field(json, "fix_valid", &patch.fix_valid_present, &patch.fix_valid)) {
         cJSON_Delete(json);
+        ESP_LOGW(TAG, "PATCH /api/v1/simulator/parameters: invalid field");
         return send_error(req, 400, "bad_request", "Invalid simulator parameter field");
     }
 
+    ESP_LOGI(TAG,
+             "PATCH /api/v1/simulator/parameters parsed: lat=%d lon=%d alt=%d speed=%d heading=%d interval=%d satellites=%d fix=%d",
+             patch.start_latitude_present,
+             patch.start_longitude_present,
+             patch.altitude_present,
+             patch.speed_present,
+             patch.heading_present,
+             patch.update_interval_present,
+             patch.satellites_present,
+             patch.fix_valid_present);
     app_state_write(apply_simulator_parameters_patch, &patch);
     cJSON_Delete(json);
 
@@ -1040,7 +1098,7 @@ static esp_err_t post_profile_load_handler(httpd_req_t *req)
     }
 
     snprintf(requested_path, sizeof(requested_path), "%s", profile_path->valuestring);
-    esp_err_t err = sdcard_json_load_profile(requested_path);
+    esp_err_t err = run_sdcard_locked(load_profile_locked_op, requested_path);
     cJSON_Delete(json);
     if (err == ESP_ERR_NOT_FOUND) {
         return send_error(req, 404, "not_found", "Profile file does not exist or SDCard is unavailable");
@@ -1094,7 +1152,11 @@ static esp_err_t post_profile_save_handler(httpd_req_t *req)
         }
         overwrite = (overwrite_item != NULL) ? cJSON_IsTrue(overwrite_item) : true;
 
-        esp_err_t err = sdcard_json_save_profile(path_value, overwrite);
+        profile_save_context_t save_ctx = {
+            .path = path_value,
+            .overwrite = overwrite,
+        };
+        esp_err_t err = run_sdcard_locked(save_profile_locked_op, &save_ctx);
         cJSON_Delete(json);
         if (err == ESP_ERR_NOT_FOUND) {
             return send_error(req, 503, "subsystem_unavailable", "SDCard is not mounted");
@@ -1106,7 +1168,11 @@ static esp_err_t post_profile_save_handler(httpd_req_t *req)
             return send_error(req, 400, "bad_request", "Failed to save profile");
         }
     } else {
-        esp_err_t err = sdcard_json_save_profile(NULL, true);
+        profile_save_context_t save_ctx = {
+            .path = NULL,
+            .overwrite = true,
+        };
+        esp_err_t err = run_sdcard_locked(save_profile_locked_op, &save_ctx);
         if (err == ESP_ERR_NOT_FOUND) {
             return send_error(req, 503, "subsystem_unavailable", "SDCard is not mounted");
         }
@@ -1131,27 +1197,33 @@ static esp_err_t post_simulator_command_handler(httpd_req_t *req)
 {
     char *body = read_request_body(req);
     if (body == NULL) {
+        ESP_LOGW(TAG, "POST /api/v1/simulator/commands: missing body");
         return send_error(req, 400, "bad_request", "Missing request body");
     }
 
+    ESP_LOGI(TAG, "POST /api/v1/simulator/commands body: %s", body);
     cJSON *json = cJSON_Parse(body);
     free(body);
     if (json == NULL) {
+        ESP_LOGW(TAG, "POST /api/v1/simulator/commands: invalid JSON");
         return send_error(req, 400, "bad_request", "Invalid JSON body");
     }
 
     const cJSON *command_item = cJSON_GetObjectItemCaseSensitive(json, "command");
     if (!cJSON_IsString(command_item)) {
         cJSON_Delete(json);
+        ESP_LOGW(TAG, "POST /api/v1/simulator/commands: command is not string");
         return send_error(req, 400, "bad_request", "Field command must be a string");
     }
 
     simulator_command_t command;
     if (!app_state_parse_simulator_command(command_item->valuestring, &command)) {
+        ESP_LOGW(TAG, "POST /api/v1/simulator/commands: unsupported command '%s'", command_item->valuestring);
         cJSON_Delete(json);
         return send_error(req, 400, "bad_request", "Unsupported simulator command");
     }
 
+    ESP_LOGI(TAG, "POST /api/v1/simulator/commands parsed command: %s", command_item->valuestring);
     app_state_write(apply_simulator_command, &command);
     cJSON_Delete(json);
 
@@ -1229,35 +1301,33 @@ static esp_err_t get_events_handler(httpd_req_t *req)
 static const char INDEX_HTML[] =
 "<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
 "<title>CRSF Display</title><style>"
-":root{color-scheme:dark;--bg:#120f12;--screen:#08110d;--panel:#132d24;--line:#245246;--text:#f9f1db;--muted:#7ca599;--acc:#ffd36e;--cyan:#82e6d2;--bad:#ff737c;--ok:#90f0a5}"
-"*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top left,#3a211c 0,transparent 32%),linear-gradient(180deg,#100d10,#0d0c0f);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif}"
-".wrap{max-width:1180px;margin:0 auto;padding:18px}.top{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}.brand{display:flex;gap:10px;align-items:center}.dot{width:12px;height:12px;border-radius:50%;background:var(--bad);box-shadow:0 0 18px var(--bad)}.dot.ok{background:var(--ok);box-shadow:0 0 18px var(--ok)}"
-"h1{font-size:24px;margin:0;color:var(--acc)}.sub{color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:320px 1fr;gap:14px}.lcd,.panel{border:1px solid var(--line);border-radius:18px;background:rgba(19,45,36,.28);box-shadow:inset 0 0 24px rgba(130,230,210,.07)}"
-".lcd{height:240px;padding:12px;background:var(--screen);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.lcdHead,.lcdFoot{display:flex;justify-content:space-between;color:var(--cyan);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.lcdFoot{border-top:1px solid rgba(130,230,210,.18);padding-top:7px;color:var(--muted)}"
-".channels{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.ch{border:1px solid rgba(130,230,210,.16);border-radius:10px;padding:5px;background:rgba(19,45,36,.45)}.ch b{display:block;color:var(--cyan);font-size:10px}.ch span{font-size:14px}.bar{height:4px;background:#24342d;border-radius:99px;overflow:hidden;margin-top:4px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--acc));width:50%}"
-".panel{padding:14px}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}.tabs button,.cmd button{border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--text);border-radius:999px;padding:7px 10px}.tabs button.active{border-color:var(--acc);color:var(--acc);background:rgba(255,211,110,.12)}"
-".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}.card{border:1px solid rgba(130,230,210,.14);border-radius:14px;background:rgba(8,17,13,.55);padding:10px}.card small{display:block;color:var(--cyan);text-transform:uppercase;letter-spacing:.08em}.card strong{display:block;margin-top:4px;font-size:18px}.muted{color:var(--muted)}"
-".cmd{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}pre{white-space:pre-wrap;margin:0;font-size:12px;color:var(--muted)}@media(max-width:760px){.grid{grid-template-columns:1fr}.lcd{max-width:320px}}"
-"</style></head><body><div class=wrap><div class=top><div class=brand><div id=linkDot class=dot></div><div><h1>CRSF Display</h1><div class=sub id=status>loading...</div></div></div><div class=sub id=time></div></div>"
-"<div class=grid><div class=lcd><div class=lcdHead><span id=lcdTitle>CRSF Channels</span><span id=lcdStatus>LINK</span></div><div id=lcdBody class=channels></div><div class=lcdFoot><span>A Back</span><span>B Select</span><span>C Next</span></div></div>"
-"<main class=panel><div class=tabs id=tabs></div><div class=cards id=cards></div><div class=cmd id=cmd></div></main></div></div>"
+":root{color-scheme:dark;--bg:#08111c;--panel:rgba(11,22,35,.86);--strong:rgba(18,34,52,.94);--line:rgba(141,184,219,.18);--line2:rgba(141,184,219,.34);--text:#e9f2fa;--muted:#97afc5;--acc:#66d7c5;--orange:#f0a64d;--blue:#8fd3ff;--good:#7ddc77;--warn:#ffbf57;--bad:#ff6d75;--shadow:0 24px 60px rgba(0,0,0,.34);--mono:ui-monospace,SFMono-Regular,Consolas,monospace}"
+"*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:24px;background:radial-gradient(circle at top left,rgba(102,215,197,.22),transparent 26%),radial-gradient(circle at right 10% top 10%,rgba(143,211,255,.18),transparent 22%),linear-gradient(160deg,#07111a 0,#091826 42%,#0d2133 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif}"
+".app{display:grid;grid-template-columns:300px minmax(0,1fr);gap:22px;min-height:calc(100vh - 48px)}.rail,.main{border:1px solid var(--line);background:var(--panel);box-shadow:var(--shadow);backdrop-filter:blur(18px);border-radius:28px;overflow:hidden}.rail{display:flex;flex-direction:column}.brand{padding:24px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(102,215,197,.14),transparent 55%),linear-gradient(180deg,rgba(143,211,255,.1),transparent 80%)}"
+".eyebrow,.chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.02)}.eyebrow{padding:6px 10px;color:var(--blue);font-size:12px;letter-spacing:.12em;text-transform:uppercase}.brand h1{margin:14px 0 6px;font-size:34px;line-height:.96}.brand p,.muted{color:var(--muted)}.section{padding:20px 24px;border-bottom:1px solid var(--line)}.sideh{margin:0 0 14px;color:var(--muted);font-size:12px;letter-spacing:.14em;text-transform:uppercase}"
+".statusGrid,.nav{display:grid;gap:10px}.statusCard,.card,.channel,.key{border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:16px}.statusCard{padding:14px 16px}.statusCard strong,.statusCard span{display:block}.statusCard span{margin-top:4px;color:var(--muted);font-size:13px}.nav button,.chipBtn,.action{appearance:none;cursor:pointer;border:1px solid var(--line);background:rgba(255,255,255,.02);color:var(--text);transition:.18s}.nav button{padding:14px 16px;border-radius:16px;text-align:left}.nav small,.nav strong{display:block}.nav small{color:var(--muted);font-size:11px;letter-spacing:.12em;text-transform:uppercase}.nav strong{margin-top:6px}.nav button.active,.chipBtn.active{border-color:rgba(102,215,197,.55);background:linear-gradient(135deg,rgba(102,215,197,.22),rgba(143,211,255,.12))}"
+".softap{margin-top:auto;padding:18px 24px 24px}.softbox{padding:16px 18px;border-radius:20px;border:1px solid rgba(102,215,197,.28);background:linear-gradient(135deg,rgba(102,215,197,.14),rgba(143,211,255,.06))}.softbox strong{display:block;font-family:var(--mono);font-size:17px}.softbox span{display:block;margin-top:4px;color:var(--muted);font-size:13px}.main{display:flex;flex-direction:column}.topbar{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:18px 22px;border-bottom:1px solid var(--line);background:rgba(8,17,28,.5)}.topLeft,.topRight{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.chip{padding:9px 12px;font-size:13px}.dot{width:10px;height:10px;border-radius:50%;background:var(--bad)}.dot.good{background:var(--good)}.dot.warn{background:var(--warn)}"
+".content{padding:22px;display:grid;gap:18px}.head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.head h2{margin:0;font-size:38px;line-height:.96}.head p{margin:8px 0 0;max-width:760px;color:var(--muted);line-height:1.45}.sync{min-width:220px;padding:12px 14px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.03)}.sync strong,.sync span{display:block}.sync span{margin-top:5px;color:var(--muted);font-size:13px}.board{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,.8fr);gap:18px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}.card{background:var(--strong);padding:18px}.card h3{margin:0 0 14px;font-size:18px}.card small{display:block;color:var(--muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase}.card strong{display:block;margin-top:8px;font-family:var(--mono);font-size:24px}.card input{width:100%;margin-top:8px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.04);color:var(--text);padding:10px 12px;font:inherit}.card input[type=checkbox]{width:auto;transform:scale(1.4);margin:14px 0 0 4px}.channels{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}.channel{padding:14px}.channel header{display:flex;justify-content:space-between;margin-bottom:10px}.val{font-family:var(--mono);font-size:28px;margin-bottom:12px}.railbar{height:10px;background:rgba(255,255,255,.06);border-radius:999px;overflow:hidden}.fill{height:100%;background:linear-gradient(90deg,var(--acc),var(--blue));border-radius:999px}.keys{display:grid;gap:12px}.key{display:flex;justify-content:space-between;gap:12px;padding:12px 14px}.key span:first-child{color:var(--muted)}.mono{font-family:var(--mono)}.actions,.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.chipBtn,.action{border-radius:14px;padding:10px 14px}.action.primary{border-color:rgba(102,215,197,.5);background:rgba(102,215,197,.18)}.action.warn{border-color:rgba(240,166,77,.5);background:rgba(240,166,77,.14)}.action.bad{border-color:rgba(255,109,117,.5);background:rgba(255,109,117,.16)}.action:disabled{opacity:.38;cursor:not-allowed;filter:grayscale(1);background:rgba(255,255,255,.03);border-color:var(--line);color:var(--muted)}@media(max-width:900px){body{padding:12px}.app,.board{grid-template-columns:1fr}.rail{order:2}}"
+"</style></head><body><div class=app><aside class=rail><div class=brand><h1>CRSF Display</h1><p>Monitor CRSF channels, telemetry, GPS source and simulator state from the browser.</p></div><div class=section><h3 class=sideh>Screens</h3><nav id=nav class=nav></nav></div><div class=section><h3 class=sideh>Device status</h3><div id=statusGrid class=statusGrid></div></div></aside><main class=main><div class=topbar><div class=topLeft><span class=chip><i id=linkDot class=dot></i><span id=linkText>Link</span></span><span class=chip id=gpsChip>GPS</span><span class=chip id=webChip>Web UI</span></div><div class=topRight><span class=muted id=time>0 ms</span></div></div><section class=content><div class=head><div><h2 id=title>Channels</h2><p id=desc>Live CRSF receiver channel values.</p></div></div><div id=body></div></section></main></div>"
 "<script>"
 "const screens=['SCREEN_CRSF_CHANNELS','SCREEN_LINK_STATISTICS','SCREEN_TELEMETRY_OVERVIEW','SCREEN_MANUAL_TELEMETRY','SCREEN_SIMULATION_PARAMETERS','SCREEN_GPS_STATUS'];"
-"const names={SCREEN_CRSF_CHANNELS:'Channels',SCREEN_LINK_STATISTICS:'Link',SCREEN_TELEMETRY_OVERVIEW:'Telemetry',SCREEN_MANUAL_TELEMETRY:'Manual',SCREEN_SIMULATION_PARAMETERS:'Simulator',SCREEN_GPS_STATUS:'GPS'};"
-"let state=null;async function api(p,o){let r=await fetch(p,o);if(!r.ok)throw new Error(await r.text());return r.json()}"
+"const labels={SCREEN_CRSF_CHANNELS:['CRSF Channels','Live CRSF receiver channel values.'],SCREEN_LINK_STATISTICS:['Link Statistics','Uplink and downlink RF quality metrics.'],SCREEN_TELEMETRY_OVERVIEW:['Telemetry Overview','Current telemetry selected by GPS source.'],SCREEN_MANUAL_TELEMETRY:['Manual Telemetry','Manual values available for editing through API.'],SCREEN_SIMULATION_PARAMETERS:['Simulation Parameters','GPS simulator runtime and profile state.'],SCREEN_GPS_STATUS:['GPS Status','External GPS serial parser diagnostics.']};"
+"let state=null,editingSim=false,editingManual=false,lastAction='';async function api(p,o){let r=await fetch(p,o);if(!r.ok)throw new Error(await r.text());return r.json()}"
 "async function setScreen(s){await api('/api/v1/ui/state',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({screen_id:s})});refresh()}"
 "async function setGps(g){await api('/api/v1/telemetry/source',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gps_source:g})});refresh()}"
-"async function sim(c){await api('/api/v1/simulator/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:c})});refresh()}"
-"function card(k,v){return `<div class=card><small>${k}</small><strong>${v==null?'':v}</strong></div>`}"
-"function renderTabs(){tabs.innerHTML=screens.map(s=>`<button class='${state.ui.screen_id==s?'active':''}' onclick=\"setScreen('${s}')\">${names[s]}</button>`).join('')}"
-"function renderLcd(){lcdTitle.textContent=names[state.ui.screen_id];lcdStatus.textContent=state.crsf_link.link_up?'LINK UP':'LINK DOWN';let ch=state.channels.channels||[];lcdBody.innerHTML=ch.map(c=>{let p=Math.round(c.normalized_value*100),w=Math.max(0,Math.min(100,(p+100)/2));return `<div class=ch><b>${c.name}</b><span>${p>0?'+':''}${p}</span><div class=bar><i style='width:${w}%'></i></div></div>`}).join('')}"
-"function renderCards(){let s=state.ui.screen_id,h='';cmd.innerHTML='';if(s==='SCREEN_CRSF_CHANNELS'){h=state.channels.channels.map(c=>card(c.name,Math.round(c.normalized_value*100)+'%')).join('')}"
-"else if(s==='SCREEN_LINK_STATISTICS'){let x=state.link_statistics.statistics;h=card('Uplink LQ',x.uplink_lq_percent+'%')+card('RSSI 1','-'+x.uplink_rssi_ant1_dbm_neg+' dBm')+card('RSSI 2','-'+x.uplink_rssi_ant2_dbm_neg+' dBm')+card('SNR',x.uplink_snr_db+' dB')+card('Down LQ',x.downlink_lq_percent+'%')+card('TX Power',x.uplink_tx_power)}"
-"else if(s==='SCREEN_TELEMETRY_OVERVIEW'){let t=state.telemetry,g=t.gps;h=card('GPS Source',state.gps_source)+card('Fix',g.fix_valid?'YES':'NO')+card('Satellites',g.satellites)+card('Latitude',g.latitude.toFixed(6))+card('Longitude',g.longitude.toFixed(6))+card('Speed',g.ground_speed_kmh+' km/h')+card('Battery',t.battery.voltage_v+' V');cmd.innerHTML=['GPS_SOURCE_MANUAL','GPS_SOURCE_EXTERNAL_GPS','GPS_SOURCE_SIMULATOR'].map(g=>`<button onclick=\"setGps('${g}')\">${g.replace('GPS_SOURCE_','')}</button>`).join('')}"
-"else if(s==='SCREEN_MANUAL_TELEMETRY'){let g=state.manual_telemetry.values.gps;h=card('Manual view','Use API PATCH /api/v1/telemetry/manual')+card('Lat',g.latitude.toFixed(6))+card('Lon',g.longitude.toFixed(6))+card('Alt',g.gps_altitude_m+' m')}"
-"else if(s==='SCREEN_SIMULATION_PARAMETERS'){let x=state.simulator,p=x.parameters;h=card('State',x.state)+card('Profile',x.active_profile_name)+card('Lat',p.start_latitude.toFixed(6))+card('Lon',p.start_longitude.toFixed(6))+card('Speed',p.speed_kmh+' km/h')+card('SD',x.sdcard.mounted?'mounted':'not mounted');cmd.innerHTML=['start','pause','resume','stop','reset'].map(c=>`<button onclick=\"sim('${c}')\">${c}</button>`).join('')}"
-"else{let g=state.gps_status;h=card('Connected',g.connected?'YES':'NO')+card('Stream',g.data_stream_present?'YES':'NO')+card('Protocol',g.protocol)+card('Errors',g.parser_errors)+card('Serial',g.serial.rx_gpio+'/'+g.serial.tx_gpio)}cards.innerHTML=h}"
-"async function refresh(){try{state=await api('/api/v1/system/state');linkDot.className='dot '+(state.crsf_link.link_up?'ok':'');status.textContent=`GPS ${state.gps_source} | WiFi ${state.wifi.ready?'ready':'booting'} | Web ${state.wifi.web_ui_ready?'ready':'booting'}`;time.textContent=state.device_time_ms+' ms';renderTabs();renderLcd();renderCards()}catch(e){status.textContent=e.message}}"
+"async function sim(c){lastAction='Sending '+c;webChip.textContent=lastAction;console.log('sim command',c);try{editingSim=false;let r=await api('/api/v1/simulator/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:c})});lastAction='Command '+c+' OK';console.log('sim response',r);await refresh()}catch(e){lastAction='Command '+c+' failed: '+e.message;webChip.textContent=lastAction;console.error('sim failed',e)}}"
+"async function saveSim(){let f=document.getElementById('simForm'),d={};['start_latitude','start_longitude','altitude_m','speed_kmh','heading_deg','update_interval_ms','satellites'].forEach(k=>d[k]=Number(f.elements[k].value));d.fix_valid=f.elements.fix_valid.checked;lastAction='Saving simulator parameters';webChip.textContent=lastAction;console.log('sim params',d);try{editingSim=false;let r=await api('/api/v1/simulator/parameters',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});lastAction='Parameters saved';console.log('sim params response',r);await refresh()}catch(e){lastAction='Save failed: '+e.message;webChip.textContent=lastAction;console.error('sim save failed',e)}}"
+"async function saveManual(){let f=document.getElementById('manualForm'),d={gps:{},attitude:{},barometric_altitude:{},battery:{},flight_mode:{}};['latitude','longitude','gps_altitude_m','ground_speed_kmh','heading_deg','satellites'].forEach(k=>d.gps[k]=Number(f.elements[k].value));d.gps.fix_valid=f.elements.fix_valid.checked;['pitch_deg','roll_deg','yaw_deg'].forEach(k=>d.attitude[k]=Number(f.elements[k].value));d.barometric_altitude.baro_altitude_m=Number(f.elements.baro_altitude_m.value);d.battery.voltage_v=Number(f.elements.voltage_v.value);d.battery.current_a=Number(f.elements.current_a.value);d.flight_mode.mode_name=f.elements.mode_name.value;lastAction='Saving manual telemetry';webChip.textContent=lastAction;console.log('manual telemetry',d);try{editingManual=false;let r=await api('/api/v1/telemetry/manual',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});lastAction='Manual telemetry saved';console.log('manual response',r);await refresh()}catch(e){lastAction='Manual save failed: '+e.message;webChip.textContent=lastAction;console.error('manual save failed',e)}}"
+"function esc(v){return String(v==null?'':v).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]))}function card(k,v){return `<div class=card><small>${esc(k)}</small><strong>${esc(v)}</strong></div>`}function key(k,v){return `<div class=key><span>${esc(k)}</span><span class=mono>${esc(v)}</span></div>`}function field(n,l,v,d){let step=d?1/Math.pow(10,d):1;return `<label class=card><small>${l}</small><input name=${n} type=number step=${step} value=${Number(v).toFixed(d)}></label>`}"
+"function renderSide(){statusGrid.innerHTML=card('Clients',state.wifi.connected_clients)+card('SDCard',state.sdcard.mounted?'mounted':'not mounted');nav.innerHTML=screens.map(s=>`<button class='${state.ui.screen_id==s?'active':''}' onclick=\"setScreen('${s}')\"><small>${s.replace('SCREEN_','')}</small><strong>${labels[s][0]}</strong></button>`).join('')}"
+"function channels(){let ch=state.channels.channels||[];return `<div class=board><div class=channels>${ch.map(c=>{let p=Math.round(c.normalized_value*100),w=Math.max(0,Math.min(100,(p+100)/2));return `<div class=channel><header><strong>${esc(c.name)}</strong><span>${p>0?'+':''}${p}%</span></header><div class=val>${p>0?'+':''}${p}</div><div class=railbar><div class=fill style='width:${w}%'></div></div></div>`}).join('')}</div><div class=card><h3>CRSF Link</h3><div class=keys>${key('Link',state.crsf_link.link_up?'UP':'DOWN')}${key('RX active',state.crsf_link.rx_active?'YES':'NO')}${key('Frame age',state.crsf_link.last_frame_age_ms+' ms')}${key('UART',state.crsf_link.uart_port)}</div></div></div>`}"
+"function linkStats(){let x=state.link_statistics.statistics;return `<div class=cards>${card('Uplink LQ',x.uplink_lq_percent+'%')}${card('RSSI ANT1','-'+x.uplink_rssi_ant1_dbm_neg+' dBm')}${card('RSSI ANT2','-'+x.uplink_rssi_ant2_dbm_neg+' dBm')}${card('Uplink SNR',x.uplink_snr_db+' dB')}${card('Active antenna',x.active_antenna)}${card('RF mode',x.rf_mode)}${card('TX power',x.uplink_tx_power)}${card('Downlink LQ',x.downlink_lq_percent+'%')}${card('Downlink RSSI','-'+x.downlink_rssi_dbm_neg+' dBm')}${card('Downlink SNR',x.downlink_snr_db+' dB')}</div>`}"
+"function telemetry(){let t=state.telemetry,g=t.gps;return `<div class=cards>${card('Fix',g.fix_valid?'YES':'NO')}${card('Satellites',g.satellites)}${card('Latitude',Number(g.latitude).toFixed(6))}${card('Longitude',Number(g.longitude).toFixed(6))}${card('Altitude',g.gps_altitude_m+' m')}${card('Speed',Number(g.ground_speed_kmh).toFixed(1)+' km/h')}${card('Heading',g.heading_deg+' deg')}${card('Battery',Number(t.battery.voltage_v).toFixed(1)+' V / '+Number(t.battery.current_a).toFixed(1)+' A')}${card('Flight mode',t.flight_mode.mode_name)}</div><div class=actions>${['GPS_SOURCE_MANUAL','GPS_SOURCE_EXTERNAL_GPS','GPS_SOURCE_SIMULATOR'].map(g=>`<button class='chipBtn ${state.gps_source==g?'active':''}' onclick=\"setGps('${g}')\">${g.replace('GPS_SOURCE_','')}</button>`).join('')}</div>`}"
+"async function manual(){let m=await api('/api/v1/telemetry/manual'),v=m.values,g=v.gps,a=v.attitude,b=v.battery,baro=v.barometric_altitude,f=v.flight_mode,modes=['Angle Mode','Horizon Mode','Acro Mode'];body.innerHTML=`<form id=manualForm oninput=\"editingManual=true\" onsubmit=\"event.preventDefault();saveManual()\"><div class=cards>${field('latitude','Latitude',g.latitude,6)}${field('longitude','Longitude',g.longitude,6)}${field('gps_altitude_m','GPS altitude m',g.gps_altitude_m,1)}${field('ground_speed_kmh','Speed km/h',g.ground_speed_kmh,1)}${field('heading_deg','Heading deg',g.heading_deg,1)}${field('satellites','Satellites',g.satellites,0)}<label class=card><small>GPS fix valid</small><input name=fix_valid type=checkbox ${g.fix_valid?'checked':''}></label>${field('pitch_deg','Pitch deg',a.pitch_deg,1)}${field('roll_deg','Roll deg',a.roll_deg,1)}${field('yaw_deg','Yaw deg',a.yaw_deg,1)}${field('baro_altitude_m','Baro altitude m',baro.baro_altitude_m,1)}${field('voltage_v','Battery voltage V',b.voltage_v,1)}${field('current_a','Battery current A',b.current_a,1)}<label class=card><small>Flight mode</small><select name=mode_name>${modes.map(x=>`<option ${x==f.mode_name?'selected':''}>${x}</option>`).join('')}</select></label></div><div class=actions><button class='action primary' type=submit>Save manual telemetry</button></div></form>`}"
+"function simulator(){let x=state.simulator,p=x.parameters,st=x.state,run=st=='running'||st=='SIM_RUNNING'||st=='Running',paused=st=='paused'||st=='SIM_PAUSED'||st=='Paused',stopped=st=='stopped'||st=='SIM_STOPPED'||st=='Stopped';let btn=(c,cls,dis)=>`<button type=button class='action ${cls}' ${dis?'disabled':''} onclick=\"sim('${c}')\">${c}</button>`;return `<form id=simForm oninput=\"editingSim=true\" onsubmit=\"event.preventDefault();saveSim()\"><div class=cards>${card('State',x.state)}${card('Profile',x.active_profile_name)}${field('start_latitude','Start latitude',p.start_latitude,6)}${field('start_longitude','Start longitude',p.start_longitude,6)}${field('altitude_m','Altitude m',p.altitude_m,1)}${field('speed_kmh','Speed km/h',p.speed_kmh,1)}${field('heading_deg','Heading deg',p.heading_deg,1)}${field('update_interval_ms','Interval ms',p.update_interval_ms,0)}${field('satellites','Satellites',p.satellites,0)}<label class=card><small>Fix valid</small><input name=fix_valid type=checkbox ${p.fix_valid?'checked':''}></label>${card('JSON',x.last_json_operation.status)}</div><div class=actions><button class='action primary' type=submit>Save parameters</button>${btn('Start','primary',run)}${btn('Pause','warn',!run)}${btn('Resume','warn',!paused)}${btn('Stop','bad',stopped)}${btn('Reset','warn',false)}</div></form>`}"
+"function gps(){let g=state.gps_status;return `<div class=cards>${card('Connected',g.connected?'YES':'NO')}${card('Stream',g.data_stream_present?'YES':'NO')}${card('Protocol',g.protocol)}${card('Serial',g.serial.type)}${card('RX/TX',g.serial.rx_gpio+'/'+g.serial.tx_gpio)}${card('Baud',g.serial.baud_rate)}${card('Fix',g.last_fix.fix_valid?'YES':'NO')}${card('Satellites',g.last_fix.satellites)}${card('Parser errors',g.parser_errors)}</div>`}"
+"function renderMain(){let s=state.ui.screen_id;title.textContent=labels[s][0];desc.textContent=labels[s][1];if(s=='SCREEN_MANUAL_TELEMETRY'){body.innerHTML=card('Manual telemetry','loading...');manual();return}body.innerHTML=s=='SCREEN_CRSF_CHANNELS'?channels():s=='SCREEN_LINK_STATISTICS'?linkStats():s=='SCREEN_TELEMETRY_OVERVIEW'?telemetry():s=='SCREEN_SIMULATION_PARAMETERS'?simulator():gps()}"
+"async function refresh(){try{state=await api('/api/v1/system/state');linkDot.className='dot '+(state.crsf_link.link_up?'good':'bad');linkText.textContent=state.crsf_link.link_up?'LINK UP':'LINK DOWN';gpsChip.textContent='GPS '+state.gps_source.replace('GPS_SOURCE_','');webChip.textContent=lastAction||(state.wifi.web_ui_ready?'Web ready':'Web booting');time.textContent=state.device_time_ms+' ms';renderSide();let manualShown=state.ui.screen_id=='SCREEN_MANUAL_TELEMETRY'&&document.getElementById('manualForm');if(!((editingSim&&state.ui.screen_id=='SCREEN_SIMULATION_PARAMETERS')||manualShown))renderMain()}catch(e){webChip.textContent=e.message}}"
 "refresh();setInterval(refresh,1000);"
 "</script></body></html>";
 
