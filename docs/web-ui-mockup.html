@@ -1,0 +1,1509 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CRSF Display Web UI Mockup</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #08111c;
+        --bg-2: #102033;
+        --panel: rgba(11, 22, 35, 0.86);
+        --panel-strong: rgba(18, 34, 52, 0.94);
+        --line: rgba(141, 184, 219, 0.16);
+        --line-strong: rgba(141, 184, 219, 0.32);
+        --text: #e9f2fa;
+        --muted: #97afc5;
+        --accent: #66d7c5;
+        --accent-2: #f0a64d;
+        --accent-3: #8fd3ff;
+        --good: #7ddc77;
+        --warn: #ffbf57;
+        --bad: #ff6d75;
+        --shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+        --radius-xl: 28px;
+        --radius-lg: 20px;
+        --radius-md: 14px;
+        --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        --body: "Avenir Next", "Trebuchet MS", sans-serif;
+        --display: "Avenir Next Condensed", "DIN Alternate", "Trebuchet MS", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top left, rgba(102, 215, 197, 0.22), transparent 26%),
+          radial-gradient(circle at right 10% top 10%, rgba(143, 211, 255, 0.18), transparent 22%),
+          linear-gradient(160deg, #07111a 0%, #091826 42%, #0d2133 100%);
+        color: var(--text);
+        font-family: var(--body);
+      }
+
+      body {
+        padding: 24px;
+      }
+
+      .app-shell {
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+        gap: 22px;
+        min-height: calc(100vh - 48px);
+      }
+
+      .side-rail,
+      .main-shell {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        backdrop-filter: blur(18px);
+        box-shadow: var(--shadow);
+      }
+
+      .side-rail {
+        display: flex;
+        flex-direction: column;
+        border-radius: var(--radius-xl);
+        overflow: hidden;
+      }
+
+      .brand-block {
+        padding: 24px 24px 18px;
+        border-bottom: 1px solid var(--line);
+        background:
+          linear-gradient(135deg, rgba(102, 215, 197, 0.14), transparent 55%),
+          linear-gradient(180deg, rgba(143, 211, 255, 0.1), transparent 80%);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(143, 211, 255, 0.22);
+        color: var(--accent-3);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .brand-title {
+        margin: 14px 0 6px;
+        font-family: var(--display);
+        font-size: 34px;
+        line-height: 0.96;
+        letter-spacing: 0.02em;
+      }
+
+      .brand-copy {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .side-section {
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .side-heading {
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .status-grid,
+      .mini-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .status-card {
+        padding: 14px 16px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .status-card strong,
+      .status-card span {
+        display: block;
+      }
+
+      .status-card strong {
+        margin-bottom: 4px;
+        font-size: 14px;
+      }
+
+      .status-card span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .side-nav {
+        display: grid;
+        gap: 10px;
+      }
+
+      .nav-btn,
+      .chip-btn,
+      .action-btn,
+      .profile-btn {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--text);
+        cursor: pointer;
+        transition: 180ms ease;
+      }
+
+      .nav-btn {
+        padding: 14px 16px;
+        border-radius: 16px;
+        text-align: left;
+      }
+
+      .nav-btn small,
+      .nav-btn strong {
+        display: block;
+      }
+
+      .nav-btn small {
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .nav-btn strong {
+        margin-top: 6px;
+        font-size: 15px;
+      }
+
+      .nav-btn:hover,
+      .chip-btn:hover,
+      .action-btn:hover,
+      .profile-btn:hover {
+        border-color: var(--line-strong);
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .nav-btn.is-active {
+        border-color: rgba(102, 215, 197, 0.52);
+        background:
+          linear-gradient(135deg, rgba(102, 215, 197, 0.22), rgba(143, 211, 255, 0.12));
+      }
+
+      .footer-card {
+        margin-top: auto;
+        padding: 18px 24px 24px;
+      }
+
+      .softap-box {
+        padding: 16px 18px;
+        border-radius: var(--radius-lg);
+        border: 1px solid rgba(102, 215, 197, 0.28);
+        background:
+          linear-gradient(135deg, rgba(102, 215, 197, 0.14), rgba(143, 211, 255, 0.06));
+      }
+
+      .softap-box strong,
+      .softap-box span {
+        display: block;
+      }
+
+      .softap-box strong {
+        font-family: var(--mono);
+        font-size: 17px;
+      }
+
+      .softap-box span {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .main-shell {
+        border-radius: var(--radius-xl);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        align-items: center;
+        padding: 18px 22px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(8, 17, 28, 0.5);
+      }
+
+      .topbar-left,
+      .topbar-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        padding: 9px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+        font-size: 13px;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.02);
+      }
+
+      .dot.good {
+        background: var(--good);
+      }
+
+      .dot.warn {
+        background: var(--warn);
+      }
+
+      .dot.bad {
+        background: var(--bad);
+      }
+
+      .screen-stack {
+        padding: 22px;
+        display: grid;
+      }
+
+      .screen {
+        display: none;
+        gap: 18px;
+      }
+
+      .screen.is-active {
+        display: grid;
+      }
+
+      .screen-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        align-items: flex-start;
+        padding: 4px 2px 0;
+      }
+
+      .screen-head h1 {
+        margin: 0;
+        font-family: var(--display);
+        font-size: 38px;
+        line-height: 0.96;
+      }
+
+      .screen-head p {
+        margin: 8px 0 0;
+        max-width: 760px;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .sync-note {
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.03);
+        min-width: 220px;
+      }
+
+      .sync-note strong,
+      .sync-note span {
+        display: block;
+      }
+
+      .sync-note strong {
+        margin-bottom: 5px;
+      }
+
+      .sync-note span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .board,
+      .two-col,
+      .three-col,
+      .grid-cards {
+        display: grid;
+        gap: 18px;
+      }
+
+      .board {
+        grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.8fr);
+      }
+
+      .two-col {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .three-col {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grid-cards {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        background: var(--panel-strong);
+        border-radius: var(--radius-lg);
+        padding: 18px;
+        min-width: 0;
+      }
+
+      .card h2,
+      .card h3 {
+        margin: 0 0 14px;
+        font-family: var(--display);
+        letter-spacing: 0.02em;
+      }
+
+      .card h2 {
+        font-size: 22px;
+      }
+
+      .card h3 {
+        font-size: 18px;
+      }
+
+      .meta-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+
+      .meta-pill {
+        padding: 9px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .channel-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 14px;
+      }
+
+      .channel-card {
+        padding: 14px;
+        border-radius: 18px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .channel-card header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .channel-card strong {
+        font-size: 16px;
+      }
+
+      .channel-value {
+        font-family: var(--mono);
+        font-size: 28px;
+        margin-bottom: 12px;
+      }
+
+      .channel-rail {
+        height: 10px;
+        background: rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+
+      .channel-fill {
+        height: 100%;
+        width: 50%;
+        background: linear-gradient(90deg, var(--accent), var(--accent-3));
+        border-radius: inherit;
+      }
+
+      .key-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .key-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .key-item span:first-child {
+        color: var(--muted);
+      }
+
+      .key-item span:last-child,
+      .mono {
+        font-family: var(--mono);
+      }
+
+      .stats-matrix {
+        display: grid;
+        gap: 12px;
+      }
+
+      .stats-row {
+        display: grid;
+        grid-template-columns: 1.2fr 0.9fr 1.1fr;
+        gap: 12px;
+      }
+
+      .stats-cell {
+        padding: 14px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .stats-cell label {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .stats-cell strong {
+        display: block;
+        font-size: 26px;
+        font-family: var(--mono);
+      }
+
+      .stats-cell small {
+        display: block;
+        margin-top: 6px;
+        color: var(--muted);
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 14px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+
+      .field label {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .field input,
+      .field select,
+      .field textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        padding: 12px 14px;
+        font: inherit;
+      }
+
+      .field textarea {
+        min-height: 130px;
+        resize: vertical;
+      }
+
+      .field input:focus,
+      .field select:focus,
+      .field textarea:focus {
+        outline: none;
+        border-color: rgba(102, 215, 197, 0.44);
+        box-shadow: 0 0 0 4px rgba(102, 215, 197, 0.08);
+      }
+
+      .action-row,
+      .chip-row,
+      .profile-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .chip-btn,
+      .action-btn,
+      .profile-btn {
+        border-radius: 14px;
+        padding: 10px 14px;
+      }
+
+      .chip-btn.is-active,
+      .profile-btn.is-active {
+        border-color: rgba(102, 215, 197, 0.54);
+        background: rgba(102, 215, 197, 0.16);
+      }
+
+      .action-btn.primary {
+        border-color: rgba(102, 215, 197, 0.5);
+        background: rgba(102, 215, 197, 0.18);
+      }
+
+      .action-btn.warn {
+        border-color: rgba(240, 166, 77, 0.5);
+        background: rgba(240, 166, 77, 0.14);
+      }
+
+      .action-btn.bad {
+        border-color: rgba(255, 109, 117, 0.5);
+        background: rgba(255, 109, 117, 0.16);
+      }
+
+      .profile-btn {
+        text-align: left;
+      }
+
+      .profile-btn strong,
+      .profile-btn span {
+        display: block;
+      }
+
+      .profile-btn span {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .status-banner {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        padding: 14px 16px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .status-banner strong {
+        font-size: 16px;
+      }
+
+      .status-banner span {
+        color: var(--muted);
+      }
+
+      .nmea-log {
+        padding: 14px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: #071018;
+        color: #98f5d5;
+        font-family: var(--mono);
+        font-size: 13px;
+        overflow: auto;
+      }
+
+      .table-lite {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .table-lite th,
+      .table-lite td {
+        text-align: left;
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .table-lite th {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .table-lite td:last-child,
+      .table-lite th:last-child {
+        text-align: right;
+      }
+
+      .inline-stack {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .tiny {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      @media (max-width: 1180px) {
+        .app-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .side-rail {
+          order: 2;
+        }
+
+        .board,
+        .two-col,
+        .three-col {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 760px) {
+        body {
+          padding: 14px;
+        }
+
+        .screen-head {
+          flex-direction: column;
+        }
+
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .stats-row {
+          grid-template-columns: 1fr;
+        }
+
+        .screen-head h1 {
+          font-size: 31px;
+        }
+
+        .brand-title {
+          font-size: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-rail">
+        <div class="brand-block">
+          <span class="eyebrow">CRSF Display / Web Mockup</span>
+          <h1 class="brand-title">Operator Console</h1>
+          <p class="brand-copy">
+            A web-first mirror of the LCD screens with faster editing, denser diagnostics,
+            and profile-driven simulation control.
+          </p>
+        </div>
+
+        <section class="side-section">
+          <h2 class="side-heading">System Health</h2>
+          <div class="status-grid">
+            <div class="status-card">
+              <strong>CRSF Link</strong>
+              <span>Healthy / 250 fps / TX 250 mW</span>
+            </div>
+            <div class="status-card">
+              <strong>GPS Source</strong>
+              <span id="sidebar-source">Simulator / Fix valid</span>
+            </div>
+            <div class="status-card">
+              <strong>Simulation Profile</strong>
+              <span id="sidebar-profile">desert-loop.json</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="side-section">
+          <h2 class="side-heading">Screens</h2>
+          <nav class="side-nav">
+            <button class="nav-btn is-active" data-target="channels">
+              <small>LCD 01</small>
+              <strong>CRSF Channels</strong>
+            </button>
+            <button class="nav-btn" data-target="link">
+              <small>LCD 02</small>
+              <strong>Link Statistics</strong>
+            </button>
+            <button class="nav-btn" data-target="overview">
+              <small>LCD 03</small>
+              <strong>Telemetry Overview</strong>
+            </button>
+            <button class="nav-btn" data-target="manual">
+              <small>LCD 04</small>
+              <strong>Manual Telemetry</strong>
+            </button>
+            <button class="nav-btn" data-target="simulation">
+              <small>LCD 05</small>
+              <strong>Simulation Parameters</strong>
+            </button>
+            <button class="nav-btn" data-target="gps">
+              <small>LCD 06</small>
+              <strong>GPS Status</strong>
+            </button>
+          </nav>
+        </section>
+
+        <section class="side-section">
+          <h2 class="side-heading">Why Web Is Better</h2>
+          <div class="mini-stack">
+            <div class="status-card">
+              <strong>All values at once</strong>
+              <span>No LCD paging for channels, GPS, or link diagnostics.</span>
+            </div>
+            <div class="status-card">
+              <strong>Safe editing</strong>
+              <span>Forms, selectors, and visible validation before commit.</span>
+            </div>
+            <div class="status-card">
+              <strong>Shared state</strong>
+              <span>LCD and browser stay in sync through the same application model.</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="footer-card">
+          <div class="softap-box">
+            <strong>SoftAP: CRSF-Display</strong>
+            <span>Open http://192.168.4.1 from phone or laptop</span>
+          </div>
+        </div>
+      </aside>
+
+      <div class="main-shell">
+        <header class="topbar">
+          <div class="topbar-left">
+            <div class="chip"><span class="dot good"></span> LCD Sync Online</div>
+            <div class="chip"><span class="dot good"></span> Web Client 2 Connected</div>
+            <div class="chip"><span class="dot warn"></span> GPS 9600 8N1 / NMEA</div>
+            <div class="chip"><span class="dot good"></span> Profile autosave enabled</div>
+          </div>
+          <div class="topbar-right">
+            <div class="chip mono">SoftAP / 192.168.4.1</div>
+            <div class="chip mono">Last packet 18 ms ago</div>
+          </div>
+        </header>
+
+        <main class="screen-stack">
+          <section class="screen is-active" data-screen="channels">
+            <div class="screen-head">
+              <div>
+                <h1>CRSF Channels</h1>
+                <p>
+                  The LCD mirror stays recognizable, but the browser shows every normalized
+                  channel at once with large values, bars, and link context.
+                </p>
+              </div>
+              <div class="sync-note">
+                <strong>Shared logical screen</strong>
+                <span>Editing source or profile elsewhere updates this screen immediately.</span>
+              </div>
+            </div>
+
+            <div class="board">
+              <div class="card">
+                <div class="meta-row">
+                  <div class="meta-pill">Normalized output only</div>
+                  <div class="meta-pill mono">Refresh 25 Hz UI / 250 fps RF</div>
+                </div>
+                <div id="channel-grid" class="channel-grid"></div>
+              </div>
+
+              <div class="card">
+                <h2>Link Snapshot</h2>
+                <div class="key-grid">
+                  <div class="key-item"><span>CRSF state</span><span>Linked</span></div>
+                  <div class="key-item"><span>Frame rate</span><span class="mono">250 fps</span></div>
+                  <div class="key-item"><span>RF mode</span><span class="mono">3 / 250 fps</span></div>
+                  <div class="key-item"><span>TX power</span><span class="mono">4 / 250 mW</span></div>
+                  <div class="key-item"><span>Uplink LQ</span><span class="mono" id="mini-lq">98 %</span></div>
+                  <div class="key-item"><span>Uplink RSSI</span><span class="mono" id="mini-rssi">-56 dBm</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="link">
+            <div class="screen-head">
+              <div>
+                <h1>Link Statistics</h1>
+                <p>
+                  The LCD version pages through this data. The web layout presents uplink and
+                  downlink metrics together so the operator sees failures sooner.
+                </p>
+              </div>
+              <div class="sync-note">
+                <strong>Compact diagnostic view</strong>
+                <span>Codes stay visible as decoded labels and as raw enum values.</span>
+              </div>
+            </div>
+
+            <div class="stats-matrix">
+              <div class="stats-row">
+                <div class="stats-cell">
+                  <label>Uplink RSSI Antenna 1</label>
+                  <strong id="uplink-rssi-ant1">57</strong>
+                  <small>dBm * -1</small>
+                </div>
+                <div class="stats-cell">
+                  <label>Uplink RSSI Antenna 2</label>
+                  <strong id="uplink-rssi-ant2">61</strong>
+                  <small>dBm * -1</small>
+                </div>
+                <div class="stats-cell">
+                  <label>Uplink LQ / PSR</label>
+                  <strong id="uplink-lq">98%</strong>
+                  <small>Packet success rate</small>
+                </div>
+              </div>
+              <div class="stats-row">
+                <div class="stats-cell">
+                  <label>Uplink SNR</label>
+                  <strong id="uplink-snr">11 dB</strong>
+                  <small>Positive margin</small>
+                </div>
+                <div class="stats-cell">
+                  <label>Active Antenna</label>
+                  <strong id="active-antenna">0</strong>
+                  <small id="active-antenna-label">Antenna 1</small>
+                </div>
+                <div class="stats-cell">
+                  <label>RF Mode</label>
+                  <strong id="rf-mode">3</strong>
+                  <small id="rf-mode-label">250 fps</small>
+                </div>
+              </div>
+              <div class="stats-row">
+                <div class="stats-cell">
+                  <label>TX Power</label>
+                  <strong id="tx-power">4</strong>
+                  <small id="tx-power-label">250 mW</small>
+                </div>
+                <div class="stats-cell">
+                  <label>Downlink RSSI</label>
+                  <strong id="downlink-rssi">63</strong>
+                  <small>dBm * -1</small>
+                </div>
+                <div class="stats-cell">
+                  <label>Downlink LQ / PSR</label>
+                  <strong id="downlink-lq">100%</strong>
+                  <small>Packet success rate</small>
+                </div>
+              </div>
+              <div class="stats-row">
+                <div class="stats-cell">
+                  <label>Downlink SNR</label>
+                  <strong id="downlink-snr">13 dB</strong>
+                  <small>Current margin</small>
+                </div>
+                <div class="stats-cell">
+                  <label>Last update</label>
+                  <strong id="link-updated">18 ms</strong>
+                  <small>Frame freshness</small>
+                </div>
+                <div class="stats-cell">
+                  <label>Interpretation</label>
+                  <strong>Healthy</strong>
+                  <small>Enough margin for UI + telemetry</small>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="overview">
+            <div class="screen-head">
+              <div>
+                <h1>Telemetry Overview</h1>
+                <p>
+                  The same logical blocks as the LCD overview, but arranged as a dense control
+                  board. Source selection is immediate and every value stays visible.
+                </p>
+              </div>
+              <div class="sync-note">
+                <strong>GPS source</strong>
+                <span id="source-sync-note">Simulator is currently driving the GPS block.</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>Source Selector</h2>
+              <div class="chip-row">
+                <button class="chip-btn" data-source="Manual">Manual</button>
+                <button class="chip-btn" data-source="External GPS">External GPS</button>
+                <button class="chip-btn is-active" data-source="Simulator">Simulator</button>
+              </div>
+            </div>
+
+            <div class="three-col">
+              <div class="card">
+                <h3>GPS</h3>
+                <div class="key-grid">
+                  <div class="key-item"><span>Latitude</span><span class="mono" id="ov-lat">31.77124</span></div>
+                  <div class="key-item"><span>Longitude</span><span class="mono" id="ov-lon">35.21758</span></div>
+                  <div class="key-item"><span>Altitude</span><span class="mono" id="ov-alt">812 m</span></div>
+                  <div class="key-item"><span>Speed</span><span class="mono" id="ov-speed">46 km/h</span></div>
+                  <div class="key-item"><span>Course</span><span class="mono" id="ov-heading">078 deg</span></div>
+                  <div class="key-item"><span>Satellites</span><span class="mono" id="ov-sats">14</span></div>
+                </div>
+              </div>
+              <div class="card">
+                <h3>Attitude + Baro</h3>
+                <div class="key-grid">
+                  <div class="key-item"><span>Pitch</span><span class="mono">-3.2 deg</span></div>
+                  <div class="key-item"><span>Roll</span><span class="mono">+1.8 deg</span></div>
+                  <div class="key-item"><span>Yaw</span><span class="mono">078 deg</span></div>
+                  <div class="key-item"><span>Barometric Alt</span><span class="mono">804 m</span></div>
+                  <div class="key-item"><span>Flight Mode</span><span class="mono" id="ov-flight-mode">Angle Mode</span></div>
+                </div>
+              </div>
+              <div class="card">
+                <h3>Battery + Transport</h3>
+                <div class="key-grid">
+                  <div class="key-item"><span>Voltage</span><span class="mono">15.8 V</span></div>
+                  <div class="key-item"><span>Current</span><span class="mono">12.4 A</span></div>
+                  <div class="key-item"><span>Telemetry TX</span><span class="mono">Active</span></div>
+                  <div class="key-item"><span>Profile</span><span class="mono" id="ov-profile">desert-loop.json</span></div>
+                  <div class="key-item"><span>JSON sync</span><span class="mono">Saved 00:03 ago</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="manual">
+            <div class="screen-head">
+              <div>
+                <h1>Manual Telemetry</h1>
+                <p>
+                  This page keeps the LCD logic, but replaces button stepping with immediate
+                  numeric input, source grouping, and visible pending values.
+                </p>
+              </div>
+              <div class="sync-note">
+                <strong>Commit model</strong>
+                <span>Changes can be staged, reviewed, and then pushed into shared state.</span>
+              </div>
+            </div>
+
+            <div class="two-col">
+              <div class="card">
+                <h2>Editable Fields</h2>
+                <div class="field-grid">
+                  <div class="field">
+                    <label for="man-lat">Latitude</label>
+                    <input id="man-lat" type="number" step="0.00001" value="31.77124">
+                  </div>
+                  <div class="field">
+                    <label for="man-lon">Longitude</label>
+                    <input id="man-lon" type="number" step="0.00001" value="35.21758">
+                  </div>
+                  <div class="field">
+                    <label for="man-alt">GPS Altitude</label>
+                    <input id="man-alt" type="number" value="812">
+                  </div>
+                  <div class="field">
+                    <label for="man-speed">Speed km/h</label>
+                    <input id="man-speed" type="number" value="46">
+                  </div>
+                  <div class="field">
+                    <label for="man-heading">Heading deg</label>
+                    <input id="man-heading" type="number" value="78">
+                  </div>
+                  <div class="field">
+                    <label for="man-sats">Satellites</label>
+                    <input id="man-sats" type="number" value="14">
+                  </div>
+                  <div class="field">
+                    <label for="man-pitch">Pitch deg</label>
+                    <input id="man-pitch" type="number" step="0.1" value="-3.2">
+                  </div>
+                  <div class="field">
+                    <label for="man-roll">Roll deg</label>
+                    <input id="man-roll" type="number" step="0.1" value="1.8">
+                  </div>
+                  <div class="field">
+                    <label for="man-yaw">Yaw deg</label>
+                    <input id="man-yaw" type="number" value="78">
+                  </div>
+                  <div class="field">
+                    <label for="man-baro">Barometric Alt</label>
+                    <input id="man-baro" type="number" value="804">
+                  </div>
+                  <div class="field">
+                    <label for="man-voltage">Voltage</label>
+                    <input id="man-voltage" type="number" step="0.1" value="15.8">
+                  </div>
+                  <div class="field">
+                    <label for="man-current">Current</label>
+                    <input id="man-current" type="number" step="0.1" value="12.4">
+                  </div>
+                  <div class="field">
+                    <label for="man-flight">Flight Mode</label>
+                    <select id="man-flight">
+                      <option selected>Angle Mode</option>
+                      <option>Horizon Mode</option>
+                      <option>Acro Mode</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <h2>Commit Panel</h2>
+                <div class="status-banner">
+                  <div>
+                    <strong>Pending changes</strong>
+                    <span>5 fields changed since last commit</span>
+                  </div>
+                  <div class="mono">Source: Manual</div>
+                </div>
+                <div class="action-row" style="margin-top: 16px;">
+                  <button class="action-btn primary">Apply To Shared State</button>
+                  <button class="action-btn">Revert Changes</button>
+                  <button class="action-btn">Copy Current From Overview</button>
+                </div>
+                <div class="card" style="margin-top: 16px; padding: 14px;">
+                  <h3>Validation Notes</h3>
+                  <div class="key-grid">
+                    <div class="key-item"><span>Coordinates</span><span>Within valid range</span></div>
+                    <div class="key-item"><span>Flight mode</span><span>Mapped to CRSF text payload</span></div>
+                    <div class="key-item"><span>Battery</span><span>Voltage + current only</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="simulation">
+            <div class="screen-head">
+              <div>
+                <h1>Simulation Parameters</h1>
+                <p>
+                  Profile-centric simulation control is where web matters most: one page for
+                  motion, profile switching, save/load, and current run status.
+                </p>
+              </div>
+              <div class="sync-note">
+                <strong>Active profile</strong>
+                <span id="sim-profile-banner">desert-loop.json / Running</span>
+              </div>
+            </div>
+
+            <div class="board">
+              <div class="card">
+                <div class="meta-row">
+                  <div class="meta-pill">Profile set from SDCard</div>
+                  <div class="meta-pill mono" id="sim-status-pill">SIM_RUNNING</div>
+                </div>
+                <div class="field-grid">
+                  <div class="field">
+                    <label for="sim-profile-name">Active profile</label>
+                    <input id="sim-profile-name" type="text" value="desert-loop.json">
+                  </div>
+                  <div class="field">
+                    <label for="sim-lat">Start latitude</label>
+                    <input id="sim-lat" type="number" step="0.00001" value="31.77124">
+                  </div>
+                  <div class="field">
+                    <label for="sim-lon">Start longitude</label>
+                    <input id="sim-lon" type="number" step="0.00001" value="35.21758">
+                  </div>
+                  <div class="field">
+                    <label for="sim-alt">Altitude m</label>
+                    <input id="sim-alt" type="number" value="812">
+                  </div>
+                  <div class="field">
+                    <label for="sim-speed">Speed km/h</label>
+                    <input id="sim-speed" type="number" value="46">
+                  </div>
+                  <div class="field">
+                    <label for="sim-heading">Heading deg</label>
+                    <input id="sim-heading" type="number" value="78">
+                  </div>
+                  <div class="field">
+                    <label for="sim-interval">Update interval ms</label>
+                    <input id="sim-interval" type="number" value="400">
+                  </div>
+                  <div class="field">
+                    <label for="sim-sats">Satellites</label>
+                    <input id="sim-sats" type="number" value="14">
+                  </div>
+                  <div class="field">
+                    <label for="sim-fix">Fix valid</label>
+                    <select id="sim-fix">
+                      <option selected>True</option>
+                      <option>False</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="action-row" style="margin-top: 18px;">
+                  <button class="action-btn primary" data-sim-action="running">Start</button>
+                  <button class="action-btn warn" data-sim-action="paused">Pause</button>
+                  <button class="action-btn bad" data-sim-action="stopped">Stop</button>
+                  <button class="action-btn">Reset</button>
+                  <button class="action-btn">Save JSON</button>
+                  <button class="action-btn">Load JSON</button>
+                </div>
+              </div>
+
+              <div class="card">
+                <h2>Profile Library</h2>
+                <div class="profile-list">
+                  <button class="profile-btn is-active" data-profile="desert-loop.json">
+                    <strong>desert-loop.json</strong>
+                    <span>31.77124 / 35.21758 / 46 km/h</span>
+                  </button>
+                  <button class="profile-btn" data-profile="city-hover.json">
+                    <strong>city-hover.json</strong>
+                    <span>31.77811 / 35.22342 / 18 km/h</span>
+                  </button>
+                  <button class="profile-btn" data-profile="ridge-run.json">
+                    <strong>ridge-run.json</strong>
+                    <span>31.74214 / 35.20384 / 72 km/h</span>
+                  </button>
+                </div>
+                <div class="card" style="margin-top: 16px; padding: 14px;">
+                  <h3>Last file operation</h3>
+                  <div class="key-grid">
+                    <div class="key-item"><span>Path</span><span class="mono">/sdcard/crsf-display/profiles/desert-loop.json</span></div>
+                    <div class="key-item"><span>Status</span><span>Saved successfully</span></div>
+                    <div class="key-item"><span>Updated</span><span class="mono">00:03 ago</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="gps">
+            <div class="screen-head">
+              <div>
+                <h1>GPS Status</h1>
+                <p>
+                  The LCD can only summarize this information. The browser can show the parsed
+                  state, protocol details, and raw NMEA stream at the same time.
+                </p>
+              </div>
+              <div class="sync-note">
+                <strong>Parser mode</strong>
+                <span>NMEA 0183 / GGA + RMC required / GSA + GSV extended</span>
+              </div>
+            </div>
+
+            <div class="two-col">
+              <div class="card">
+                <h2>Parsed State</h2>
+                <table class="table-lite">
+                  <thead>
+                    <tr>
+                      <th>Field</th>
+                      <th>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>Connection</td><td>Online</td></tr>
+                    <tr><td>Fix valid</td><td>True</td></tr>
+                    <tr><td>Latitude</td><td class="mono">31.77124</td></tr>
+                    <tr><td>Longitude</td><td class="mono">35.21758</td></tr>
+                    <tr><td>Altitude</td><td class="mono">812 m</td></tr>
+                    <tr><td>Speed</td><td class="mono">46 km/h</td></tr>
+                    <tr><td>Course</td><td class="mono">078 deg</td></tr>
+                    <tr><td>Satellites</td><td class="mono">14</td></tr>
+                    <tr><td>Last update</td><td class="mono">00:00:18</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="card">
+                <h2>NMEA Activity</h2>
+                <div class="inline-stack" style="margin-bottom: 14px;">
+                  <div class="meta-pill">GGA required</div>
+                  <div class="meta-pill">RMC required</div>
+                  <div class="meta-pill">GSA extended</div>
+                  <div class="meta-pill">GSV extended</div>
+                </div>
+                <div class="nmea-log">
+$GNGGA,122433.00,3146.2744,N,03513.0548,E,1,14,0.82,812.4,M,-17.0,M,,*5C
+$GNRMC,122433.00,A,3146.2744,N,03513.0548,E,24.8,78.3,150526,,,A*73
+$GNGSA,A,3,03,06,09,14,17,19,22,24,28,31,,,,1.17,0.82,0.91*15
+$GPGSV,3,1,12,03,68,115,35,06,56,201,37,09,48,073,33,14,42,158,38*76
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script>
+      const channelNames = [
+        "Ail", "Elv", "Thr", "Roll",
+        "Aux1", "Aux2", "Aux3", "Aux4",
+        "Aux5", "Aux6", "Aux7", "Aux8",
+        "Aux9", "Aux10", "Aux11", "Aux12"
+      ];
+
+      const profiles = {
+        "desert-loop.json": { lat: 31.77124, lon: 35.21758, alt: 812, speed: 46, heading: 78, sats: 14, fix: "True" },
+        "city-hover.json": { lat: 31.77811, lon: 35.22342, alt: 768, speed: 18, heading: 14, sats: 11, fix: "True" },
+        "ridge-run.json": { lat: 31.74214, lon: 35.20384, alt: 946, speed: 72, heading: 121, sats: 15, fix: "True" }
+      };
+
+      const state = {
+        currentScreen: "channels",
+        gpsSource: "Simulator",
+        simulationState: "running",
+        activeProfile: "desert-loop.json",
+        link: {
+          uplinkAnt1: 57,
+          uplinkAnt2: 61,
+          uplinkLq: 98,
+          uplinkSnr: 11,
+          activeAntenna: 0,
+          rfMode: 3,
+          txPower: 4,
+          downlinkRssi: 63,
+          downlinkLq: 100,
+          downlinkSnr: 13,
+          updatedMs: 18
+        },
+        telemetry: {
+          lat: 31.77124,
+          lon: 35.21758,
+          alt: 812,
+          speed: 46,
+          heading: 78,
+          sats: 14,
+          flightMode: "Angle Mode"
+        }
+      };
+
+      const rfModeLabels = {
+        0: "4 fps",
+        1: "50 fps",
+        2: "150 fps",
+        3: "250 fps",
+        4: "500 fps",
+        5: "1000 fps"
+      };
+
+      const txPowerLabels = {
+        0: "0 mW",
+        1: "10 mW",
+        2: "25 mW",
+        3: "100 mW",
+        4: "250 mW",
+        5: "500 mW",
+        6: "1000 mW",
+        7: "2000 mW"
+      };
+
+      function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
+      function channelSeed(index) {
+        const bases = [12, -8, 61, 4, -32, 40, 12, -11, 55, -52, 24, -17, 78, -66, 35, -6];
+        return bases[index];
+      }
+
+      function buildChannels() {
+        const host = document.getElementById("channel-grid");
+        channelNames.forEach((name, index) => {
+          const card = document.createElement("article");
+          card.className = "channel-card";
+          card.innerHTML = [
+            "<header>",
+            `<strong>${name}</strong>`,
+            `<span class="tiny">norm</span>`,
+            "</header>",
+            `<div class="channel-value mono" id="channel-value-${index}">${channelSeed(index)}</div>`,
+            '<div class="channel-rail"><div class="channel-fill" id="channel-fill-' + index + '"></div></div>'
+          ].join("");
+          host.appendChild(card);
+        });
+        renderChannels();
+      }
+
+      function renderChannels() {
+        channelNames.forEach((_, index) => {
+          const value = clamp(channelSeed(index) + Math.round(Math.sin((Date.now() / 900) + index) * 9), -100, 100);
+          const fill = ((value + 100) / 200) * 100;
+          document.getElementById(`channel-value-${index}`).textContent = value > 0 ? `+${value}` : `${value}`;
+          document.getElementById(`channel-fill-${index}`).style.width = `${fill}%`;
+        });
+      }
+
+      function renderLink() {
+        const link = state.link;
+        document.getElementById("uplink-rssi-ant1").textContent = link.uplinkAnt1;
+        document.getElementById("uplink-rssi-ant2").textContent = link.uplinkAnt2;
+        document.getElementById("uplink-lq").textContent = `${link.uplinkLq}%`;
+        document.getElementById("uplink-snr").textContent = `${link.uplinkSnr} dB`;
+        document.getElementById("active-antenna").textContent = link.activeAntenna;
+        document.getElementById("active-antenna-label").textContent = link.activeAntenna === 0 ? "Antenna 1" : "Antenna 2";
+        document.getElementById("rf-mode").textContent = link.rfMode;
+        document.getElementById("rf-mode-label").textContent = rfModeLabels[link.rfMode];
+        document.getElementById("tx-power").textContent = link.txPower;
+        document.getElementById("tx-power-label").textContent = txPowerLabels[link.txPower];
+        document.getElementById("downlink-rssi").textContent = link.downlinkRssi;
+        document.getElementById("downlink-lq").textContent = `${link.downlinkLq}%`;
+        document.getElementById("downlink-snr").textContent = `${link.downlinkSnr} dB`;
+        document.getElementById("link-updated").textContent = `${link.updatedMs} ms`;
+        document.getElementById("mini-lq").textContent = `${link.uplinkLq} %`;
+        document.getElementById("mini-rssi").textContent = `-${link.uplinkAnt1} dBm`;
+      }
+
+      function renderOverview() {
+        const t = state.telemetry;
+        document.getElementById("ov-lat").textContent = t.lat.toFixed(5);
+        document.getElementById("ov-lon").textContent = t.lon.toFixed(5);
+        document.getElementById("ov-alt").textContent = `${t.alt} m`;
+        document.getElementById("ov-speed").textContent = `${t.speed} km/h`;
+        document.getElementById("ov-heading").textContent = `${String(t.heading).padStart(3, "0")} deg`;
+        document.getElementById("ov-sats").textContent = `${t.sats}`;
+        document.getElementById("ov-flight-mode").textContent = t.flightMode;
+        document.getElementById("ov-profile").textContent = state.activeProfile;
+        document.getElementById("sidebar-source").textContent = `${state.gpsSource} / Fix valid`;
+        document.getElementById("sidebar-profile").textContent = state.activeProfile;
+        document.getElementById("source-sync-note").textContent = `${state.gpsSource} is currently driving the GPS block.`;
+
+        document.querySelectorAll("[data-source]").forEach((btn) => {
+          btn.classList.toggle("is-active", btn.dataset.source === state.gpsSource);
+        });
+      }
+
+      function renderSimulation() {
+        document.getElementById("sim-profile-name").value = state.activeProfile;
+        document.getElementById("sim-profile-banner").textContent = `${state.activeProfile} / ${state.simulationState.toUpperCase()}`;
+        document.getElementById("sim-status-pill").textContent = `SIM_${state.simulationState.toUpperCase()}`;
+        document.querySelectorAll("[data-profile]").forEach((btn) => {
+          btn.classList.toggle("is-active", btn.dataset.profile === state.activeProfile);
+        });
+      }
+
+      function showScreen(target) {
+        state.currentScreen = target;
+        document.querySelectorAll(".screen").forEach((screen) => {
+          screen.classList.toggle("is-active", screen.dataset.screen === target);
+        });
+        document.querySelectorAll(".nav-btn").forEach((btn) => {
+          btn.classList.toggle("is-active", btn.dataset.target === target);
+        });
+      }
+
+      function applyProfile(name) {
+        state.activeProfile = name;
+        const p = profiles[name];
+        state.telemetry.lat = p.lat;
+        state.telemetry.lon = p.lon;
+        state.telemetry.alt = p.alt;
+        state.telemetry.speed = p.speed;
+        state.telemetry.heading = p.heading;
+        state.telemetry.sats = p.sats;
+        document.getElementById("sim-lat").value = p.lat;
+        document.getElementById("sim-lon").value = p.lon;
+        document.getElementById("sim-alt").value = p.alt;
+        document.getElementById("sim-speed").value = p.speed;
+        document.getElementById("sim-heading").value = p.heading;
+        document.getElementById("sim-sats").value = p.sats;
+        document.getElementById("sim-fix").value = p.fix;
+        renderOverview();
+        renderSimulation();
+      }
+
+      function randomWalkTelemetry() {
+        if (state.gpsSource !== "Simulator" || state.simulationState !== "running") {
+          return;
+        }
+        state.telemetry.lat += 0.00003;
+        state.telemetry.lon += 0.00002;
+        state.telemetry.heading = (state.telemetry.heading + 1) % 360;
+        state.telemetry.speed = clamp(state.telemetry.speed + (Math.random() > 0.5 ? 1 : -1), 18, 72);
+      }
+
+      function randomWalkLink() {
+        const l = state.link;
+        l.uplinkAnt1 = clamp(l.uplinkAnt1 + (Math.random() > 0.5 ? 1 : -1), 52, 68);
+        l.uplinkAnt2 = clamp(l.uplinkAnt2 + (Math.random() > 0.5 ? 1 : -1), 55, 72);
+        l.uplinkLq = clamp(l.uplinkLq + (Math.random() > 0.7 ? -1 : 0), 95, 100);
+        l.uplinkSnr = clamp(l.uplinkSnr + (Math.random() > 0.5 ? 1 : -1), 7, 14);
+        l.activeAntenna = Math.random() > 0.74 ? 1 - l.activeAntenna : l.activeAntenna;
+        l.downlinkRssi = clamp(l.downlinkRssi + (Math.random() > 0.5 ? 1 : -1), 58, 69);
+        l.downlinkLq = clamp(l.downlinkLq + (Math.random() > 0.8 ? -1 : 0), 96, 100);
+        l.downlinkSnr = clamp(l.downlinkSnr + (Math.random() > 0.5 ? 1 : -1), 9, 16);
+        l.updatedMs = 12 + Math.floor(Math.random() * 14);
+      }
+
+      buildChannels();
+      renderLink();
+      renderOverview();
+      renderSimulation();
+
+      document.querySelectorAll(".nav-btn").forEach((btn) => {
+        btn.addEventListener("click", () => showScreen(btn.dataset.target));
+      });
+
+      document.querySelectorAll("[data-source]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.gpsSource = btn.dataset.source;
+          renderOverview();
+        });
+      });
+
+      document.querySelectorAll("[data-profile]").forEach((btn) => {
+        btn.addEventListener("click", () => applyProfile(btn.dataset.profile));
+      });
+
+      document.querySelectorAll("[data-sim-action]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.simulationState = btn.dataset.simAction;
+          renderSimulation();
+        });
+      });
+
+      document.getElementById("man-flight").addEventListener("change", (event) => {
+        state.telemetry.flightMode = event.target.value;
+        renderOverview();
+      });
+
+      setInterval(() => {
+        renderChannels();
+        randomWalkLink();
+        randomWalkTelemetry();
+        renderLink();
+        renderOverview();
+      }, 1100);
+    </script>
+  </body>
+</html>

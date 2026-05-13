@@ -1,0 +1,1430 @@
+openapi: 3.0.3
+info:
+  title: CRSF Display Web UI API
+  version: 1.0.0
+  description: |
+    OpenAPI specification for the embedded Web UI API of the CRSF Display project.
+
+    Scope of the API:
+    - provide the same logical screens as the LCD UI;
+    - expose current CRSF RX channels and Link Statistics;
+    - expose telemetry overview and manual telemetry editing;
+    - manage GPS source selection;
+    - manage simulator parameters and JSON profiles on SDCard;
+    - expose external GPS diagnostics;
+    - publish live updates for the browser without full page reload.
+
+    Transport model:
+    - request/response: JSON over HTTP;
+    - live updates: Server-Sent Events on `/api/v1/events`.
+
+    Design notes:
+    - all required navigation must remain possible on the LCD with short button presses;
+    - updates from Web UI and LCD are applied to the same shared application state;
+    - save/load operations for simulator JSON profiles are asynchronous and should be tracked
+      via the state endpoints or the event stream.
+servers:
+  - url: http://192.168.4.1
+    description: Default SoftAP endpoint
+  - url: http://crsf-display.local
+    description: Optional mDNS endpoint when available
+tags:
+  - name: System
+    description: Service health, global device state, and live updates
+  - name: UI
+    description: Shared UI state between LCD and Web UI
+  - name: Channels
+    description: CRSF RX channels screen
+  - name: Link Statistics
+    description: CRSF link quality screen
+  - name: Telemetry
+    description: Telemetry overview, GPS source, and manual telemetry
+  - name: Simulator
+    description: GPS simulator parameters, commands, and profile management
+  - name: GPS
+    description: External GPS diagnostics
+paths:
+  /api/v1/health:
+    get:
+      tags:
+        - System
+      summary: Read API health
+      operationId: getHealth
+      responses:
+        '200':
+          description: API is reachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                device_time_ms: 152388
+                web_ui_ready: true
+                wifi_ready: true
+                version: 1.0.0
+  /api/v1/system/state:
+    get:
+      tags:
+        - System
+      summary: Read full device snapshot
+      description: |
+        Returns a full state snapshot suitable for bootstrapping the Web UI after page load.
+        Clients should then use `GET /api/v1/events` for live updates.
+      operationId: getSystemState
+      responses:
+        '200':
+          description: Full device snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemStateResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/events:
+    get:
+      tags:
+        - System
+      summary: Subscribe to live state updates
+      description: |
+        Opens a Server-Sent Events stream.
+
+        Recommended event names:
+        - `system_state`
+        - `ui_state`
+        - `crsf_channels`
+        - `link_statistics`
+        - `telemetry_overview`
+        - `manual_telemetry`
+        - `simulator_state`
+        - `gps_status`
+        - `diagnostic`
+
+        Clients should reconnect automatically if the connection drops.
+      operationId: subscribeEvents
+      responses:
+        '200':
+          description: Event stream established
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |-
+                event: telemetry_overview
+                data: {"timestamp_ms":152400,"gps_source":"GPS_SOURCE_SIMULATOR","telemetry_tx":{"status":"ok","last_tx_age_ms":14}}
+
+                event: link_statistics
+                data: {"timestamp_ms":152412,"uplink_lq_percent":99,"downlink_lq_percent":96}
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/ui/state:
+    get:
+      tags:
+        - UI
+      summary: Read shared UI state
+      operationId: getUiState
+      responses:
+        '200':
+          description: Current LCD/Web UI state model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UiState'
+    patch:
+      tags:
+        - UI
+      summary: Update shared UI state
+      description: |
+        Intended for screen sync, selected item sync, and edit mode transitions.
+        The device may ignore unsupported transitions while returning the actual state.
+      operationId: patchUiState
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UiStatePatchRequest'
+            example:
+              screen_id: SCREEN_SIMULATION_PARAMETERS
+              selected_item: profile_path
+              edit_mode: false
+      responses:
+        '200':
+          description: Updated UI state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UiState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/channels:
+    get:
+      tags:
+        - Channels
+      summary: Read CRSF RX channels screen data
+      operationId: getChannels
+      responses:
+        '200':
+          description: Current channel values and RX state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelsResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/link-statistics:
+    get:
+      tags:
+        - Link Statistics
+      summary: Read CRSF link statistics screen data
+      operationId: getLinkStatistics
+      responses:
+        '200':
+          description: Current CRSF link statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkStatisticsResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/telemetry/overview:
+    get:
+      tags:
+        - Telemetry
+      summary: Read telemetry overview screen data
+      operationId: getTelemetryOverview
+      responses:
+        '200':
+          description: Current aggregated telemetry and telemetry TX state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryOverviewResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/telemetry/source:
+    patch:
+      tags:
+        - Telemetry
+      summary: Change active GPS telemetry source
+      description: |
+        Changes only the active GPS source. Manual `attitude`, `barometric_altitude`,
+        `battery`, and `flight_mode` remain editable and stored independently.
+      operationId: patchTelemetrySource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetrySourceUpdateRequest'
+            example:
+              gps_source: GPS_SOURCE_EXTERNAL_GPS
+      responses:
+        '200':
+          description: Updated telemetry overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryOverviewResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/telemetry/manual:
+    get:
+      tags:
+        - Telemetry
+      summary: Read manual telemetry screen data
+      description: |
+        Returns editable values for manual telemetry input. GPS values may be edited even when
+        the active GPS source is not manual; they become active after switching to
+        `GPS_SOURCE_MANUAL`.
+      operationId: getManualTelemetry
+      responses:
+        '200':
+          description: Manual telemetry values and editing metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManualTelemetryResponse'
+    patch:
+      tags:
+        - Telemetry
+      summary: Update manual telemetry values
+      operationId: patchManualTelemetry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualTelemetryUpdateRequest'
+            example:
+              attitude:
+                pitch_deg: 4.2
+                roll_deg: -1.3
+                yaw_deg: 178.0
+              battery:
+                voltage_v: 15.8
+                current_a: 12.4
+              flight_mode:
+                mode_name: Angle Mode
+      responses:
+        '200':
+          description: Updated manual telemetry values
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManualTelemetryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/simulator:
+    get:
+      tags:
+        - Simulator
+      summary: Read simulation parameters screen data
+      operationId: getSimulatorState
+      responses:
+        '200':
+          description: Current simulator state, parameters, and storage status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorStateResponse'
+  /api/v1/simulator/parameters:
+    patch:
+      tags:
+        - Simulator
+      summary: Update simulator parameters
+      description: |
+        Partial update for simulator parameters. The current simulator run state is preserved
+        unless changed explicitly via `/api/v1/simulator/commands`.
+      operationId: patchSimulatorParameters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorParametersUpdateRequest'
+            example:
+              start_latitude: 32.0853
+              start_longitude: 34.7818
+              altitude_m: 118.0
+              speed_kmh: 41.4
+              heading_deg: 178.0
+              update_interval_ms: 200
+              satellites: 12
+              fix_valid: true
+      responses:
+        '200':
+          description: Updated simulator state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorStateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/simulator/commands:
+    post:
+      tags:
+        - Simulator
+      summary: Execute simulator command
+      operationId: postSimulatorCommand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorCommandRequest'
+            example:
+              command: Pause
+      responses:
+        '200':
+          description: Command applied and current simulator state returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorStateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/simulator/profiles:
+    get:
+      tags:
+        - Simulator
+      summary: List simulator JSON profiles on SDCard
+      operationId: getSimulatorProfiles
+      responses:
+        '200':
+          description: Available simulator profiles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulatorProfileListResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/simulator/profiles/load:
+    post:
+      tags:
+        - Simulator
+      summary: Queue simulator profile load from SDCard
+      description: |
+        Load operation is asynchronous. The browser should watch `last_json_operation`
+        via `GET /api/v1/simulator`, `GET /api/v1/system/state`, or `/api/v1/events`.
+      operationId: postSimulatorProfileLoad
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorProfileLoadRequest'
+            example:
+              profile_path: /sdcard/crsf-display/profiles/urban_loop.json
+      responses:
+        '202':
+          description: Load request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAcceptedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/simulator/profiles/save:
+    post:
+      tags:
+        - Simulator
+      summary: Queue simulator profile save to SDCard
+      description: |
+        Save operation is asynchronous. The browser should watch `last_json_operation`
+        via `GET /api/v1/simulator`, `GET /api/v1/system/state`, or `/api/v1/events`.
+      operationId: postSimulatorProfileSave
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulatorProfileSaveRequest'
+            example:
+              profile_path: /sdcard/crsf-display/profiles/urban_loop.json
+              overwrite: true
+      responses:
+        '202':
+          description: Save request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAcceptedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/gps/status:
+    get:
+      tags:
+        - GPS
+      summary: Read external GPS diagnostics screen data
+      operationId: getGpsStatus
+      responses:
+        '200':
+          description: Current external GPS diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GpsStatusResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+components:
+  responses:
+    BadRequest:
+      description: Request body or query parameters are invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: bad_request
+            message: Invalid field value
+    NotFound:
+      description: Requested resource was not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: not_found
+            message: Profile file does not exist
+    Conflict:
+      description: Requested transition conflicts with current runtime state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: state_conflict
+            message: Simulator cannot be paused while stopped
+    ServiceUnavailable:
+      description: Dependent subsystem is not ready
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          example:
+            code: subsystem_unavailable
+            message: SDCard is not mounted
+  schemas:
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - device_time_ms
+        - web_ui_ready
+        - wifi_ready
+        - version
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+        device_time_ms:
+          type: integer
+          format: int64
+          minimum: 0
+        web_ui_ready:
+          type: boolean
+        wifi_ready:
+          type: boolean
+        version:
+          type: string
+    SystemStateResponse:
+      type: object
+      required:
+        - device_time_ms
+        - crsf_link
+        - telemetry_tx
+        - gps_source
+        - ui
+        - sdcard
+        - wifi
+        - channels
+        - link_statistics
+        - telemetry
+        - simulator
+        - gps_status
+        - diagnostics
+      properties:
+        device_time_ms:
+          type: integer
+          format: int64
+        crsf_link:
+          $ref: '#/components/schemas/CrsfLinkState'
+        telemetry_tx:
+          $ref: '#/components/schemas/TelemetryTxStatus'
+        gps_source:
+          $ref: '#/components/schemas/GpsSource'
+        ui:
+          $ref: '#/components/schemas/UiState'
+        sdcard:
+          $ref: '#/components/schemas/SdCardStatus'
+        wifi:
+          $ref: '#/components/schemas/WifiStatus'
+        channels:
+          $ref: '#/components/schemas/ChannelsResponse'
+        link_statistics:
+          $ref: '#/components/schemas/LinkStatisticsResponse'
+        telemetry:
+          $ref: '#/components/schemas/TelemetryOverviewResponse'
+        simulator:
+          $ref: '#/components/schemas/SimulatorStateResponse'
+        gps_status:
+          $ref: '#/components/schemas/GpsStatusResponse'
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiagnosticMessage'
+    DiagnosticMessage:
+      type: object
+      required:
+        - severity
+        - code
+        - message
+      properties:
+        severity:
+          type: string
+          enum:
+            - info
+            - warning
+            - error
+        code:
+          type: string
+        message:
+          type: string
+        timestamp_ms:
+          type: integer
+          format: int64
+    CrsfLinkState:
+      type: object
+      required:
+        - link_up
+        - rx_active
+        - frame_error
+        - last_frame_age_ms
+        - uart_port
+      properties:
+        link_up:
+          type: boolean
+        rx_active:
+          type: boolean
+        frame_error:
+          type: boolean
+        last_frame_age_ms:
+          type: integer
+          minimum: 0
+        uart_port:
+          type: string
+          enum:
+            - UART2
+    TelemetryTxStatus:
+      type: object
+      required:
+        - status
+        - last_tx_age_ms
+        - enabled_blocks
+      properties:
+        status:
+          type: string
+          enum:
+            - idle
+            - ok
+            - error
+        last_tx_age_ms:
+          type: integer
+          minimum: 0
+        last_error:
+          type: string
+          nullable: true
+        enabled_blocks:
+          type: array
+          items:
+            type: string
+            enum:
+              - GPS
+              - Attitude
+              - Barometric Altitude
+              - Battery
+              - Flight Modes
+    SdCardStatus:
+      type: object
+      required:
+        - mounted
+        - profiles_directory
+      properties:
+        mounted:
+          type: boolean
+        profiles_directory:
+          type: string
+          example: /sdcard/crsf-display/profiles/
+        free_bytes:
+          type: integer
+          format: int64
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+    WifiStatus:
+      type: object
+      required:
+        - ready
+        - mode
+        - ssid
+        - ip_address
+        - connected_clients
+        - web_ui_ready
+      properties:
+        ready:
+          type: boolean
+        mode:
+          type: string
+          enum:
+            - softap
+            - sta
+            - ap_sta
+        ssid:
+          type: string
+        ip_address:
+          type: string
+        hostname:
+          type: string
+          nullable: true
+        connected_clients:
+          type: integer
+          minimum: 0
+        web_ui_ready:
+          type: boolean
+    UiState:
+      type: object
+      required:
+        - screen_id
+        - selected_item
+        - edit_mode
+        - gps_source
+      properties:
+        screen_id:
+          $ref: '#/components/schemas/ScreenId'
+        selected_item:
+          type: string
+          nullable: true
+        edit_mode:
+          type: boolean
+        gps_source:
+          $ref: '#/components/schemas/GpsSource'
+        dialog_state:
+          type: string
+          nullable: true
+    UiStatePatchRequest:
+      type: object
+      properties:
+        screen_id:
+          $ref: '#/components/schemas/ScreenId'
+        selected_item:
+          type: string
+          nullable: true
+        edit_mode:
+          type: boolean
+        gps_source:
+          $ref: '#/components/schemas/GpsSource'
+        dialog_state:
+          type: string
+          nullable: true
+      additionalProperties: false
+    ScreenId:
+      type: string
+      enum:
+        - SCREEN_CRSF_CHANNELS
+        - SCREEN_LINK_STATISTICS
+        - SCREEN_TELEMETRY_OVERVIEW
+        - SCREEN_MANUAL_TELEMETRY
+        - SCREEN_SIMULATION_PARAMETERS
+        - SCREEN_GPS_STATUS
+    GpsSource:
+      type: string
+      enum:
+        - GPS_SOURCE_MANUAL
+        - GPS_SOURCE_EXTERNAL_GPS
+        - GPS_SOURCE_SIMULATOR
+    ChannelsResponse:
+      type: object
+      required:
+        - timestamp_ms
+        - crsf_link
+        - telemetry_tx
+        - channels
+      properties:
+        timestamp_ms:
+          type: integer
+          format: int64
+        crsf_link:
+          $ref: '#/components/schemas/CrsfLinkState'
+        telemetry_tx:
+          $ref: '#/components/schemas/TelemetryTxStatus'
+        channels:
+          type: array
+          minItems: 16
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/ChannelValue'
+    ChannelValue:
+      type: object
+      required:
+        - name
+        - normalized_value
+      properties:
+        name:
+          type: string
+          enum:
+            - Ail
+            - Elv
+            - Thr
+            - Roll
+            - Aux1
+            - Aux2
+            - Aux3
+            - Aux4
+            - Aux5
+            - Aux6
+            - Aux7
+            - Aux8
+            - Aux9
+            - Aux10
+            - Aux11
+            - Aux12
+        normalized_value:
+          type: number
+          format: float
+          minimum: -100
+          maximum: 100
+    LinkStatisticsResponse:
+      type: object
+      required:
+        - timestamp_ms
+        - statistics
+      properties:
+        timestamp_ms:
+          type: integer
+          format: int64
+        statistics:
+          $ref: '#/components/schemas/LinkStatistics'
+    LinkStatistics:
+      type: object
+      required:
+        - uplink_rssi_ant1_dbm_neg
+        - uplink_rssi_ant2_dbm_neg
+        - uplink_lq_percent
+        - uplink_snr_db
+        - active_antenna
+        - rf_mode
+        - uplink_tx_power
+        - downlink_rssi_dbm_neg
+        - downlink_lq_percent
+        - downlink_snr_db
+        - timestamp_ms
+      properties:
+        uplink_rssi_ant1_dbm_neg:
+          type: integer
+          description: Absolute RSSI value where the actual dBm is `-value`
+        uplink_rssi_ant2_dbm_neg:
+          type: integer
+          description: Absolute RSSI value where the actual dBm is `-value`
+        uplink_lq_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        uplink_snr_db:
+          type: integer
+        active_antenna:
+          type: integer
+          enum:
+            - 0
+            - 1
+          description: 0 = Antenna 1, 1 = Antenna 2
+        rf_mode:
+          type: integer
+          enum:
+            - 0
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+          description: 0 = 4 fps, 1 = 50 fps, 2 = 150 fps, 3 = 250 fps, 4 = 500 fps, 5 = 1000 fps
+        uplink_tx_power:
+          type: integer
+          enum:
+            - 0
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+          description: 0 = 0 mW, 1 = 10 mW, 2 = 25 mW, 3 = 100 mW, 4 = 250 mW, 5 = 500 mW, 6 = 1000 mW, 7 = 2000 mW
+        downlink_rssi_dbm_neg:
+          type: integer
+          description: Absolute RSSI value where the actual dBm is `-value`
+        downlink_lq_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        downlink_snr_db:
+          type: integer
+        timestamp_ms:
+          type: integer
+          format: int64
+    TelemetryOverviewResponse:
+      type: object
+      required:
+        - timestamp_ms
+        - gps_source
+        - gps
+        - attitude
+        - barometric_altitude
+        - battery
+        - flight_mode
+        - telemetry_tx
+      properties:
+        timestamp_ms:
+          type: integer
+          format: int64
+        gps_source:
+          $ref: '#/components/schemas/GpsSource'
+        gps:
+          $ref: '#/components/schemas/GpsTelemetry'
+        attitude:
+          $ref: '#/components/schemas/AttitudeTelemetry'
+        barometric_altitude:
+          $ref: '#/components/schemas/BarometricAltitudeTelemetry'
+        battery:
+          $ref: '#/components/schemas/BatteryTelemetry'
+        flight_mode:
+          $ref: '#/components/schemas/FlightModeTelemetry'
+        telemetry_tx:
+          $ref: '#/components/schemas/TelemetryTxStatus'
+    TelemetrySourceUpdateRequest:
+      type: object
+      required:
+        - gps_source
+      properties:
+        gps_source:
+          $ref: '#/components/schemas/GpsSource'
+      additionalProperties: false
+    ManualTelemetryResponse:
+      type: object
+      required:
+        - timestamp_ms
+        - values
+        - editable_fields
+        - flight_mode_options
+      properties:
+        timestamp_ms:
+          type: integer
+          format: int64
+        values:
+          $ref: '#/components/schemas/ManualTelemetryValues'
+        editable_fields:
+          type: array
+          items:
+            type: string
+          example:
+            - gps.latitude
+            - gps.longitude
+            - gps.gps_altitude_m
+            - attitude.pitch_deg
+            - attitude.roll_deg
+            - attitude.yaw_deg
+            - barometric_altitude.baro_altitude_m
+            - battery.voltage_v
+            - battery.current_a
+            - flight_mode.mode_name
+        flight_mode_options:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: string
+            enum:
+              - Angle Mode
+              - Horizon Mode
+              - Acro Mode
+    ManualTelemetryValues:
+      type: object
+      required:
+        - gps
+        - attitude
+        - barometric_altitude
+        - battery
+        - flight_mode
+      properties:
+        gps:
+          $ref: '#/components/schemas/GpsTelemetry'
+        attitude:
+          $ref: '#/components/schemas/AttitudeTelemetry'
+        barometric_altitude:
+          $ref: '#/components/schemas/BarometricAltitudeTelemetry'
+        battery:
+          $ref: '#/components/schemas/BatteryTelemetry'
+        flight_mode:
+          $ref: '#/components/schemas/FlightModeTelemetry'
+    ManualTelemetryUpdateRequest:
+      type: object
+      properties:
+        gps:
+          $ref: '#/components/schemas/GpsTelemetryUpdate'
+        attitude:
+          $ref: '#/components/schemas/AttitudeTelemetryUpdate'
+        barometric_altitude:
+          $ref: '#/components/schemas/BarometricAltitudeTelemetryUpdate'
+        battery:
+          $ref: '#/components/schemas/BatteryTelemetryUpdate'
+        flight_mode:
+          $ref: '#/components/schemas/FlightModeTelemetry'
+      additionalProperties: false
+    GpsTelemetry:
+      type: object
+      required:
+        - latitude
+        - longitude
+        - gps_altitude_m
+        - ground_speed_kmh
+        - heading_deg
+        - satellites
+        - fix_valid
+        - source
+      properties:
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        gps_altitude_m:
+          type: number
+          format: float
+        ground_speed_kmh:
+          type: number
+          format: float
+        heading_deg:
+          type: number
+          format: float
+        satellites:
+          type: integer
+          minimum: 0
+        fix_valid:
+          type: boolean
+        source:
+          $ref: '#/components/schemas/GpsSource'
+    GpsTelemetryUpdate:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        gps_altitude_m:
+          type: number
+          format: float
+        ground_speed_kmh:
+          type: number
+          format: float
+        heading_deg:
+          type: number
+          format: float
+        satellites:
+          type: integer
+          minimum: 0
+        fix_valid:
+          type: boolean
+      additionalProperties: false
+    AttitudeTelemetry:
+      type: object
+      required:
+        - pitch_deg
+        - roll_deg
+        - yaw_deg
+      properties:
+        pitch_deg:
+          type: number
+          format: float
+        roll_deg:
+          type: number
+          format: float
+        yaw_deg:
+          type: number
+          format: float
+    AttitudeTelemetryUpdate:
+      type: object
+      properties:
+        pitch_deg:
+          type: number
+          format: float
+        roll_deg:
+          type: number
+          format: float
+        yaw_deg:
+          type: number
+          format: float
+      additionalProperties: false
+    BarometricAltitudeTelemetry:
+      type: object
+      required:
+        - baro_altitude_m
+      properties:
+        baro_altitude_m:
+          type: number
+          format: float
+    BarometricAltitudeTelemetryUpdate:
+      type: object
+      properties:
+        baro_altitude_m:
+          type: number
+          format: float
+      additionalProperties: false
+    BatteryTelemetry:
+      type: object
+      required:
+        - voltage_v
+        - current_a
+      properties:
+        voltage_v:
+          type: number
+          format: float
+        current_a:
+          type: number
+          format: float
+    BatteryTelemetryUpdate:
+      type: object
+      properties:
+        voltage_v:
+          type: number
+          format: float
+        current_a:
+          type: number
+          format: float
+      additionalProperties: false
+    FlightModeTelemetry:
+      type: object
+      required:
+        - mode_name
+      properties:
+        mode_name:
+          type: string
+          enum:
+            - Angle Mode
+            - Horizon Mode
+            - Acro Mode
+    SimulatorStateResponse:
+      type: object
+      required:
+        - timestamp_ms
+        - state
+        - parameters
+        - current_gps
+        - active_profile_name
+        - active_profile_path
+        - sdcard
+        - last_json_operation
+      properties:
+        timestamp_ms:
+          type: integer
+          format: int64
+        state:
+          $ref: '#/components/schemas/SimulatorRunState'
+        parameters:
+          $ref: '#/components/schemas/SimulatorParameters'
+        current_gps:
+          $ref: '#/components/schemas/GpsTelemetry'
+        active_profile_name:
+          type: string
+        active_profile_path:
+          type: string
+        next_emit_in_ms:
+          type: integer
+          minimum: 0
+          nullable: true
+        sdcard:
+          $ref: '#/components/schemas/SdCardStatus'
+        last_json_operation:
+          $ref: '#/components/schemas/JsonOperationStatus'
+    SimulatorParameters:
+      type: object
+      required:
+        - version
+        - start_latitude
+        - start_longitude
+        - altitude_m
+        - speed_kmh
+        - heading_deg
+        - update_interval_ms
+        - satellites
+        - fix_valid
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        start_latitude:
+          type: number
+          format: double
+        start_longitude:
+          type: number
+          format: double
+        altitude_m:
+          type: number
+          format: float
+        speed_kmh:
+          type: number
+          format: float
+        heading_deg:
+          type: number
+          format: float
+        update_interval_ms:
+          type: integer
+          minimum: 20
+        satellites:
+          type: integer
+          minimum: 0
+        fix_valid:
+          type: boolean
+    SimulatorParametersUpdateRequest:
+      type: object
+      properties:
+        version:
+          type: integer
+          minimum: 1
+        start_latitude:
+          type: number
+          format: double
+        start_longitude:
+          type: number
+          format: double
+        altitude_m:
+          type: number
+          format: float
+        speed_kmh:
+          type: number
+          format: float
+        heading_deg:
+          type: number
+          format: float
+        update_interval_ms:
+          type: integer
+          minimum: 20
+        satellites:
+          type: integer
+          minimum: 0
+        fix_valid:
+          type: boolean
+      additionalProperties: false
+    SimulatorRunState:
+      type: string
+      enum:
+        - SIM_STOPPED
+        - SIM_RUNNING
+        - SIM_PAUSED
+    SimulatorCommandRequest:
+      type: object
+      required:
+        - command
+      properties:
+        command:
+          type: string
+          enum:
+            - Start
+            - Pause
+            - Resume
+            - Stop
+            - Reset
+      additionalProperties: false
+    SimulatorProfileListResponse:
+      type: object
+      required:
+        - profiles_directory
+        - selected_profile_path
+        - profiles
+      properties:
+        profiles_directory:
+          type: string
+        selected_profile_path:
+          type: string
+          nullable: true
+        profiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatorProfileSummary'
+    SimulatorProfileSummary:
+      type: object
+      required:
+        - name
+        - path
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+        modified_at_ms:
+          type: integer
+          format: int64
+          nullable: true
+    SimulatorProfileLoadRequest:
+      type: object
+      required:
+        - profile_path
+      properties:
+        profile_path:
+          type: string
+      additionalProperties: false
+    SimulatorProfileSaveRequest:
+      type: object
+      properties:
+        profile_path:
+          type: string
+          description: If omitted, save into the currently active profile path
+        overwrite:
+          type: boolean
+          default: true
+      additionalProperties: false
+    OperationAcceptedResponse:
+      type: object
+      required:
+        - accepted
+        - operation
+        - timestamp_ms
+      properties:
+        accepted:
+          type: boolean
+          enum:
+            - true
+        operation:
+          type: string
+          enum:
+            - load_profile
+            - save_profile
+        timestamp_ms:
+          type: integer
+          format: int64
+        profile_path:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+    JsonOperationStatus:
+      type: object
+      required:
+        - operation
+        - status
+        - timestamp_ms
+      properties:
+        operation:
+          type: string
+          enum:
+            - none
+            - load_profile
+            - save_profile
+        status:
+          type: string
+          enum:
+            - idle
+            - queued
+            - in_progress
+            - success
+            - error
+        timestamp_ms:
+          type: integer
+          format: int64
+        profile_path:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+    GpsStatusResponse:
+      type: object
+      required:
+        - timestamp_ms
+        - connected
+        - data_stream_present
+        - protocol
+        - serial
+        - last_fix
+        - parsed_messages
+      properties:
+        timestamp_ms:
+          type: integer
+          format: int64
+        connected:
+          type: boolean
+        data_stream_present:
+          type: boolean
+        protocol:
+          type: string
+          enum:
+            - NMEA_0183
+        serial:
+          $ref: '#/components/schemas/GpsSerialInfo'
+        last_fix:
+          $ref: '#/components/schemas/GpsFixStatus'
+        parsed_messages:
+          type: array
+          items:
+            type: string
+            enum:
+              - GGA
+              - RMC
+              - GSA
+              - GSV
+        parser_errors:
+          type: integer
+          minimum: 0
+    GpsSerialInfo:
+      type: object
+      required:
+        - type
+        - rx_gpio
+        - tx_gpio
+        - baud_rate
+      properties:
+        type:
+          type: string
+          enum:
+            - software_uart
+        rx_gpio:
+          type: integer
+          enum:
+            - 21
+        tx_gpio:
+          type: integer
+          enum:
+            - 22
+        baud_rate:
+          type: integer
+          enum:
+            - 9600
+    GpsFixStatus:
+      type: object
+      required:
+        - latitude
+        - longitude
+        - speed_kmh
+        - course_deg
+        - altitude_m
+        - satellites
+        - fix_valid
+        - last_update_age_ms
+      properties:
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        speed_kmh:
+          type: number
+          format: float
+        course_deg:
+          type: number
+          format: float
+        altitude_m:
+          type: number
+          format: float
+        satellites:
+          type: integer
+          minimum: 0
+        fix_valid:
+          type: boolean
+        last_update_age_ms:
+          type: integer
+          minimum: 0
