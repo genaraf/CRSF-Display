@@ -6,7 +6,9 @@ idf_component_register(
         "crsf/crsf_rx.c"
         "crsf/crsf_tx.c"
         "gps/gps_input.c"
+        "sdcard/sdcard_json.c"
         "simulator/simulator.c"
+        "storage/storage.c"
         "telemetry/telemetry_manager.c"
         "ui/ui.c"
         "web/web_ui.c"
@@ -14,12 +16,15 @@ idf_component_register(
     INCLUDE_DIRS
         "."
     REQUIRES
+        fatfs
         esp_http_server
         esp_netif
         esp_wifi
         esp_event
+        esp_driver_spi
         json
         nvs_flash
+        sdmmc
 )
 
 target_link_libraries(${COMPONENT_LIB} PRIVATE m)

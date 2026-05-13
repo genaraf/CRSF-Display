@@ -15,6 +15,10 @@ static const char *TAG = "wifi_manager";
 
 static esp_netif_t *s_ap_netif;
 
+typedef struct {
+    int32_t event_id;
+} wifi_event_update_t;
+
 static void fill_ip_address(wifi_status_t *wifi_state)
 {
     if ((s_ap_netif == NULL) || (wifi_state == NULL)) {
@@ -29,20 +33,48 @@ static void fill_ip_address(wifi_status_t *wifi_state)
     snprintf(wifi_state->ip_address, sizeof(wifi_state->ip_address), IPSTR, IP2STR(&ip_info.ip));
 }
 
-static void update_wifi_state(app_state_t *state, void *ctx)
+static void update_wifi_ip_address(app_state_t *state, void *ctx)
 {
-    wifi_status_t *wifi = (wifi_status_t *) ctx;
-    state->wifi = *wifi;
+    (void) ctx;
+    fill_ip_address(&state->wifi);
+}
+
+static void update_wifi_state_for_event(app_state_t *state, void *ctx)
+{
+    wifi_event_update_t *update = (wifi_event_update_t *) ctx;
+
+    if (update == NULL) {
+        return;
+    }
+
+    if (update->event_id == WIFI_EVENT_AP_START) {
+        state->wifi.ready = true;
+        fill_ip_address(&state->wifi);
+    } else if (update->event_id == WIFI_EVENT_AP_STOP) {
+        state->wifi.ready = false;
+    } else if (update->event_id == WIFI_EVENT_AP_STACONNECTED) {
+        state->wifi.connected_clients += 1;
+    } else if (update->event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        if (state->wifi.connected_clients > 0) {
+            state->wifi.connected_clients -= 1;
+        }
+    }
+}
+
+static void update_web_ui_ready_flag(app_state_t *state, void *ctx)
+{
+    bool *ready = (bool *) ctx;
+
+    if (ready == NULL) {
+        return;
+    }
+
+    state->wifi.web_ui_ready = *ready;
 }
 
 static void sync_ip_address(void)
 {
-    wifi_status_t wifi_state;
-    app_state_t snapshot;
-    app_state_get_snapshot(&snapshot);
-    wifi_state = snapshot.wifi;
-    fill_ip_address(&wifi_state);
-    app_state_write(update_wifi_state, &wifi_state);
+    app_state_write(update_wifi_ip_address, NULL);
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -51,24 +83,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     (void) event_base;
     (void) event_data;
 
-    app_state_t snapshot;
-    app_state_get_snapshot(&snapshot);
-    wifi_status_t wifi_state = snapshot.wifi;
+    wifi_event_update_t update = {
+        .event_id = event_id,
+    };
 
-    if (event_id == WIFI_EVENT_AP_START) {
-        wifi_state.ready = true;
-        fill_ip_address(&wifi_state);
-    } else if (event_id == WIFI_EVENT_AP_STOP) {
-        wifi_state.ready = false;
-    } else if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_state.connected_clients += 1;
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        if (wifi_state.connected_clients > 0) {
-            wifi_state.connected_clients -= 1;
-        }
-    }
-
-    app_state_write(update_wifi_state, &wifi_state);
+    app_state_write(update_wifi_state_for_event, &update);
 }
 
 esp_err_t wifi_manager_start(void)
@@ -117,8 +136,5 @@ esp_err_t wifi_manager_start(void)
 
 void wifi_manager_set_web_ui_ready(bool ready)
 {
-    app_state_t snapshot;
-    app_state_get_snapshot(&snapshot);
-    snapshot.wifi.web_ui_ready = ready;
-    app_state_write(update_wifi_state, &snapshot.wifi);
+    app_state_write(update_web_ui_ready_flag, &ready);
 }

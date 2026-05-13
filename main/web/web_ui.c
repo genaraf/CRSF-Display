@@ -10,6 +10,10 @@
 #include "cJSON.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "sdcard/sdcard_json.h"
+#include "storage/storage.h"
 #include "telemetry/telemetry_manager.h"
 #include "wifi/wifi_manager.h"
 
@@ -71,6 +75,19 @@ typedef struct {
     int satellites;
     bool fix_valid;
 } simulator_parameters_patch_t;
+
+typedef struct {
+    bool screen_id_present;
+    ui_screen_id_t screen_id;
+    bool selected_item_present;
+    char selected_item[APP_MAX_SELECTED_ITEM_LEN];
+    bool edit_mode_present;
+    bool edit_mode;
+    bool gps_source_present;
+    gps_source_t gps_source;
+    bool dialog_state_present;
+    char dialog_state[APP_MAX_DIALOG_STATE_LEN];
+} ui_state_patch_t;
 
 static bool is_valid_flight_mode(const char *mode_name)
 {
@@ -255,6 +272,38 @@ static cJSON *json_create_ui_state(const ui_state_t *ui)
     return json;
 }
 
+static cJSON *json_create_operation_accepted(const char *operation, const char *profile_path, const char *message)
+{
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "accepted", true);
+    cJSON_AddStringToObject(json, "operation", operation);
+    cJSON_AddNumberToObject(json, "timestamp_ms", app_state_now_ms());
+    cJSON_AddStringToObject(json, "profile_path", (profile_path != NULL) ? profile_path : "");
+    cJSON_AddStringToObject(json, "message", (message != NULL) ? message : "");
+    return json;
+}
+
+static cJSON *json_create_profiles_list_response(const sdcard_json_profile_list_t *profiles, const char *selected_profile_path)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON *items = cJSON_CreateArray();
+
+    cJSON_AddStringToObject(root, "profiles_directory", APP_SIMULATOR_DEFAULT_PROFILE_DIR);
+    cJSON_AddStringToObject(root, "selected_profile_path", (selected_profile_path != NULL) ? selected_profile_path : "");
+
+    for (int i = 0; i < profiles->count; ++i) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "name", profiles->items[i].name);
+        cJSON_AddStringToObject(item, "path", profiles->items[i].path);
+        cJSON_AddNumberToObject(item, "size_bytes", profiles->items[i].size_bytes);
+        cJSON_AddNumberToObject(item, "modified_at_ms", profiles->items[i].modified_at_ms);
+        cJSON_AddItemToArray(items, item);
+    }
+
+    cJSON_AddItemToObject(root, "profiles", items);
+    return root;
+}
+
 static cJSON *json_create_sdcard_status(const sdcard_status_t *sdcard)
 {
     cJSON *json = cJSON_CreateObject();
@@ -399,6 +448,8 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *json, int status_code)
         status_text = "202 Accepted";
     } else if (status_code == 400) {
         status_text = "400 Bad Request";
+    } else if (status_code == 404) {
+        status_text = "404 Not Found";
     } else if (status_code == 409) {
         status_text = "409 Conflict";
     } else if (status_code == 503) {
@@ -475,6 +526,13 @@ static esp_err_t get_system_state_handler(httpd_req_t *req)
     return send_json(req, json_create_system_state(&state), 200);
 }
 
+static esp_err_t get_ui_state_handler(httpd_req_t *req)
+{
+    app_state_t state;
+    app_state_get_snapshot(&state);
+    return send_json(req, json_create_ui_state(&state.ui), 200);
+}
+
 static esp_err_t get_channels_handler(httpd_req_t *req)
 {
     app_state_t state;
@@ -501,6 +559,103 @@ static esp_err_t get_manual_telemetry_handler(httpd_req_t *req)
     app_state_t state;
     app_state_get_snapshot(&state);
     return send_json(req, json_create_manual_telemetry(&state), 200);
+}
+
+static void apply_ui_state_patch(app_state_t *state, void *ctx)
+{
+    ui_state_patch_t *patch = (ui_state_patch_t *) ctx;
+
+    if (patch->screen_id_present) {
+        state->ui.screen_id = patch->screen_id;
+    }
+    if (patch->selected_item_present) {
+        snprintf(state->ui.selected_item, sizeof(state->ui.selected_item), "%s", patch->selected_item);
+    }
+    if (patch->edit_mode_present) {
+        state->ui.mode = patch->edit_mode ? UI_MODE_EDIT : UI_MODE_VIEW;
+    }
+    if (patch->dialog_state_present) {
+        snprintf(state->ui.dialog_state, sizeof(state->ui.dialog_state), "%s", patch->dialog_state);
+    }
+    if (patch->gps_source_present) {
+        telemetry_manager_set_gps_source_locked(state, patch->gps_source);
+    } else {
+        state->ui.gps_source = state->gps_source;
+    }
+}
+
+static esp_err_t patch_ui_state_handler(httpd_req_t *req)
+{
+    char *body = read_request_body(req);
+    if (body == NULL) {
+        return send_error(req, 400, "bad_request", "Missing request body");
+    }
+
+    cJSON *json = cJSON_Parse(body);
+    free(body);
+    if (json == NULL) {
+        return send_error(req, 400, "bad_request", "Invalid JSON body");
+    }
+
+    ui_state_patch_t patch = {0};
+    cJSON *screen_id = cJSON_GetObjectItemCaseSensitive(json, "screen_id");
+    cJSON *selected_item = cJSON_GetObjectItemCaseSensitive(json, "selected_item");
+    cJSON *edit_mode = cJSON_GetObjectItemCaseSensitive(json, "edit_mode");
+    cJSON *gps_source = cJSON_GetObjectItemCaseSensitive(json, "gps_source");
+    cJSON *dialog_state = cJSON_GetObjectItemCaseSensitive(json, "dialog_state");
+
+    if (screen_id != NULL) {
+        if (!cJSON_IsString(screen_id) || !app_state_parse_screen_id(screen_id->valuestring, &patch.screen_id)) {
+            cJSON_Delete(json);
+            return send_error(req, 400, "bad_request", "Field screen_id is invalid");
+        }
+        patch.screen_id_present = true;
+    }
+
+    if (selected_item != NULL) {
+        if (!cJSON_IsString(selected_item)) {
+            cJSON_Delete(json);
+            return send_error(req, 400, "bad_request", "Field selected_item must be a string");
+        }
+        patch.selected_item_present = true;
+        snprintf(patch.selected_item, sizeof(patch.selected_item), "%s", selected_item->valuestring);
+    }
+
+    if (edit_mode != NULL) {
+        if (!cJSON_IsBool(edit_mode)) {
+            cJSON_Delete(json);
+            return send_error(req, 400, "bad_request", "Field edit_mode must be boolean");
+        }
+        patch.edit_mode_present = true;
+        patch.edit_mode = cJSON_IsTrue(edit_mode);
+    }
+
+    if (gps_source != NULL) {
+        if (!cJSON_IsString(gps_source) || !app_state_parse_gps_source(gps_source->valuestring, &patch.gps_source)) {
+            cJSON_Delete(json);
+            return send_error(req, 400, "bad_request", "Field gps_source is invalid");
+        }
+        patch.gps_source_present = true;
+    }
+
+    if (dialog_state != NULL) {
+        if (!cJSON_IsString(dialog_state)) {
+            cJSON_Delete(json);
+            return send_error(req, 400, "bad_request", "Field dialog_state must be a string");
+        }
+        patch.dialog_state_present = true;
+        snprintf(patch.dialog_state, sizeof(patch.dialog_state), "%s", dialog_state->valuestring);
+    }
+
+    app_state_write(apply_ui_state_patch, &patch);
+    if (patch.gps_source_present) {
+        (void) storage_save_runtime_state();
+    }
+    cJSON_Delete(json);
+
+    app_state_t state;
+    app_state_get_snapshot(&state);
+    return send_json(req, json_create_ui_state(&state.ui), 200);
 }
 
 static bool parse_float_field(cJSON *object, const char *name, bool *present, float *value)
@@ -716,6 +871,7 @@ static esp_err_t patch_manual_telemetry_handler(httpd_req_t *req)
     }
 
     app_state_write(apply_manual_telemetry_patch, &patch);
+    (void) storage_save_runtime_state();
     cJSON_Delete(json);
 
     app_state_t state;
@@ -755,6 +911,7 @@ static esp_err_t patch_telemetry_source_handler(httpd_req_t *req)
     }
 
     app_state_write(set_gps_source_callback, &source);
+    (void) storage_save_runtime_state();
     cJSON_Delete(json);
 
     app_state_t state;
@@ -767,6 +924,19 @@ static esp_err_t get_simulator_handler(httpd_req_t *req)
     app_state_t state;
     app_state_get_snapshot(&state);
     return send_json(req, json_create_simulator(&state), 200);
+}
+
+static esp_err_t get_profiles_handler(httpd_req_t *req)
+{
+    app_state_t state;
+    sdcard_json_profile_list_t profiles;
+    esp_err_t err = sdcard_json_list_profiles(&profiles);
+    if (err != ESP_OK) {
+        return send_error(req, 503, "subsystem_unavailable", "SDCard is not mounted");
+    }
+
+    app_state_get_snapshot(&state);
+    return send_json(req, json_create_profiles_list_response(&profiles, state.simulator.active_profile_path), 200);
 }
 
 static void apply_simulator_parameters_patch(app_state_t *state, void *ctx)
@@ -840,6 +1010,108 @@ static esp_err_t patch_simulator_parameters_handler(httpd_req_t *req)
     return send_json(req, json_create_simulator(&state), 200);
 }
 
+static esp_err_t post_profile_load_handler(httpd_req_t *req)
+{
+    char *body = read_request_body(req);
+    char requested_path[APP_MAX_PROFILE_PATH_LEN];
+    if (body == NULL) {
+        return send_error(req, 400, "bad_request", "Missing request body");
+    }
+
+    cJSON *json = cJSON_Parse(body);
+    free(body);
+    if (json == NULL) {
+        return send_error(req, 400, "bad_request", "Invalid JSON body");
+    }
+
+    cJSON *profile_path = cJSON_GetObjectItemCaseSensitive(json, "profile_path");
+    if (!cJSON_IsString(profile_path)) {
+        cJSON_Delete(json);
+        return send_error(req, 400, "bad_request", "Field profile_path must be a string");
+    }
+
+    snprintf(requested_path, sizeof(requested_path), "%s", profile_path->valuestring);
+    esp_err_t err = sdcard_json_load_profile(requested_path);
+    cJSON_Delete(json);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return send_error(req, 404, "not_found", "Profile file does not exist or SDCard is unavailable");
+    }
+    if (err != ESP_OK) {
+        return send_error(req, 400, "bad_request", "Failed to load profile");
+    }
+
+    (void) storage_save_runtime_state();
+    return send_json(req, json_create_operation_accepted("load_profile", requested_path, "Profile loaded"), 202);
+}
+
+static esp_err_t post_profile_save_handler(httpd_req_t *req)
+{
+    char *body;
+    bool overwrite = true;
+    const char *path_value = NULL;
+    char requested_path[APP_MAX_PROFILE_PATH_LEN] = {0};
+
+    if (req->content_len > 0) {
+        cJSON *json;
+        cJSON *profile_path;
+        cJSON *overwrite_item;
+
+        body = read_request_body(req);
+        if (body == NULL) {
+            return send_error(req, 400, "bad_request", "Invalid request body");
+        }
+
+        json = cJSON_Parse(body);
+        free(body);
+        if (json == NULL) {
+            return send_error(req, 400, "bad_request", "Invalid JSON body");
+        }
+
+        profile_path = cJSON_GetObjectItemCaseSensitive(json, "profile_path");
+        overwrite_item = cJSON_GetObjectItemCaseSensitive(json, "overwrite");
+        if ((profile_path != NULL) && !cJSON_IsString(profile_path)) {
+            cJSON_Delete(json);
+            return send_error(req, 400, "bad_request", "Field profile_path must be a string");
+        }
+        if ((overwrite_item != NULL) && !cJSON_IsBool(overwrite_item)) {
+            cJSON_Delete(json);
+            return send_error(req, 400, "bad_request", "Field overwrite must be boolean");
+        }
+
+        path_value = (profile_path != NULL) ? profile_path->valuestring : NULL;
+        if (path_value != NULL) {
+            snprintf(requested_path, sizeof(requested_path), "%s", path_value);
+            path_value = requested_path;
+        }
+        overwrite = (overwrite_item != NULL) ? cJSON_IsTrue(overwrite_item) : true;
+
+        esp_err_t err = sdcard_json_save_profile(path_value, overwrite);
+        cJSON_Delete(json);
+        if (err == ESP_ERR_NOT_FOUND) {
+            return send_error(req, 503, "subsystem_unavailable", "SDCard is not mounted");
+        }
+        if (err == ESP_ERR_INVALID_STATE) {
+            return send_error(req, 409, "state_conflict", "Profile already exists");
+        }
+        if (err != ESP_OK) {
+            return send_error(req, 400, "bad_request", "Failed to save profile");
+        }
+    } else {
+        esp_err_t err = sdcard_json_save_profile(NULL, true);
+        if (err == ESP_ERR_NOT_FOUND) {
+            return send_error(req, 503, "subsystem_unavailable", "SDCard is not mounted");
+        }
+        if (err != ESP_OK) {
+            return send_error(req, 400, "bad_request", "Failed to save profile");
+        }
+    }
+
+    (void) storage_save_runtime_state();
+    app_state_t state;
+    app_state_get_snapshot(&state);
+    return send_json(req, json_create_operation_accepted("save_profile", state.simulator.active_profile_path, "Profile saved"), 202);
+}
+
 static void apply_simulator_command(app_state_t *state, void *ctx)
 {
     simulator_command_t *command = (simulator_command_t *) ctx;
@@ -886,6 +1158,65 @@ static esp_err_t get_gps_status_handler(httpd_req_t *req)
     return send_json(req, json_create_gps_status(&state), 200);
 }
 
+static esp_err_t send_sse_json_event(httpd_req_t *req, const char *event_name, cJSON *json)
+{
+    char *payload = cJSON_PrintUnformatted(json);
+    char header[64];
+    esp_err_t err;
+
+    cJSON_Delete(json);
+    if (payload == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    snprintf(header, sizeof(header), "event: %s\n", event_name);
+    err = httpd_resp_send_chunk(req, header, HTTPD_RESP_USE_STRLEN);
+    if (err == ESP_OK) {
+        err = httpd_resp_send_chunk(req, "data: ", 6);
+    }
+    if (err == ESP_OK) {
+        err = httpd_resp_send_chunk(req, payload, HTTPD_RESP_USE_STRLEN);
+    }
+    if (err == ESP_OK) {
+        err = httpd_resp_send_chunk(req, "\n\n", 2);
+    }
+
+    free(payload);
+    return err;
+}
+
+static esp_err_t get_events_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/event-stream");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    httpd_resp_set_hdr(req, "Connection", "keep-alive");
+
+    for (int i = 0; i < APP_WEB_SSE_MAX_BURST_COUNT; ++i) {
+        app_state_t state;
+        esp_err_t err;
+
+        app_state_get_snapshot(&state);
+        err = send_sse_json_event(req, "system_state", json_create_system_state(&state));
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        err = send_sse_json_event(req, "telemetry_overview", json_create_telemetry_overview(&state));
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        err = send_sse_json_event(req, "link_statistics", json_create_link_statistics(&state));
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(APP_WEB_SSE_INTERVAL_MS));
+    }
+
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
 static esp_err_t get_root_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/plain");
@@ -901,6 +1232,7 @@ esp_err_t web_ui_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = APP_HTTP_SERVER_PORT;
     config.max_uri_handlers = APP_HTTP_MAX_URI_HANDLERS;
+    config.stack_size = APP_HTTP_SERVER_STACK_SIZE;
 
     ESP_LOGI(TAG, "Starting HTTP server on port %u", config.server_port);
     esp_err_t err = httpd_start(&s_http_server, &config);
@@ -912,6 +1244,9 @@ esp_err_t web_ui_start(void)
         {.uri = "/", .method = HTTP_GET, .handler = get_root_handler, .user_ctx = NULL},
         {.uri = "/api/v1/health", .method = HTTP_GET, .handler = get_health_handler, .user_ctx = NULL},
         {.uri = "/api/v1/system/state", .method = HTTP_GET, .handler = get_system_state_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/events", .method = HTTP_GET, .handler = get_events_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/ui/state", .method = HTTP_GET, .handler = get_ui_state_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/ui/state", .method = HTTP_PATCH, .handler = patch_ui_state_handler, .user_ctx = NULL},
         {.uri = "/api/v1/channels", .method = HTTP_GET, .handler = get_channels_handler, .user_ctx = NULL},
         {.uri = "/api/v1/link-statistics", .method = HTTP_GET, .handler = get_link_statistics_handler, .user_ctx = NULL},
         {.uri = "/api/v1/telemetry/overview", .method = HTTP_GET, .handler = get_telemetry_overview_handler, .user_ctx = NULL},
@@ -921,6 +1256,9 @@ esp_err_t web_ui_start(void)
         {.uri = "/api/v1/simulator", .method = HTTP_GET, .handler = get_simulator_handler, .user_ctx = NULL},
         {.uri = "/api/v1/simulator/parameters", .method = HTTP_PATCH, .handler = patch_simulator_parameters_handler, .user_ctx = NULL},
         {.uri = "/api/v1/simulator/commands", .method = HTTP_POST, .handler = post_simulator_command_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/simulator/profiles", .method = HTTP_GET, .handler = get_profiles_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/simulator/profiles/load", .method = HTTP_POST, .handler = post_profile_load_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/simulator/profiles/save", .method = HTTP_POST, .handler = post_profile_save_handler, .user_ctx = NULL},
         {.uri = "/api/v1/gps/status", .method = HTTP_GET, .handler = get_gps_status_handler, .user_ctx = NULL},
     };
 

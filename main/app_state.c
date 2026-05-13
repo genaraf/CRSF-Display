@@ -187,6 +187,17 @@ void app_state_get_snapshot(app_state_t *snapshot)
     xSemaphoreGive(s_state_store.mutex);
 }
 
+void app_state_read(app_state_read_fn_t read_fn, void *ctx)
+{
+    if (read_fn == NULL) {
+        return;
+    }
+
+    xSemaphoreTake(s_state_store.mutex, portMAX_DELAY);
+    read_fn(&s_state_store.data, ctx);
+    xSemaphoreGive(s_state_store.mutex);
+}
+
 void app_state_write(app_state_write_fn_t write_fn, void *ctx)
 {
     if (write_fn == NULL) {
@@ -331,6 +342,45 @@ bool app_state_parse_gps_source(const char *text, gps_source_t *source)
 
     if (strcmp(text, "GPS_SOURCE_SIMULATOR") == 0) {
         *source = GPS_SOURCE_SIMULATOR;
+        return true;
+    }
+
+    return false;
+}
+
+bool app_state_parse_screen_id(const char *text, ui_screen_id_t *screen_id)
+{
+    if ((text == NULL) || (screen_id == NULL)) {
+        return false;
+    }
+
+    if (strcmp(text, "SCREEN_CRSF_CHANNELS") == 0) {
+        *screen_id = SCREEN_CRSF_CHANNELS;
+        return true;
+    }
+
+    if (strcmp(text, "SCREEN_LINK_STATISTICS") == 0) {
+        *screen_id = SCREEN_LINK_STATISTICS;
+        return true;
+    }
+
+    if (strcmp(text, "SCREEN_TELEMETRY_OVERVIEW") == 0) {
+        *screen_id = SCREEN_TELEMETRY_OVERVIEW;
+        return true;
+    }
+
+    if (strcmp(text, "SCREEN_MANUAL_TELEMETRY") == 0) {
+        *screen_id = SCREEN_MANUAL_TELEMETRY;
+        return true;
+    }
+
+    if (strcmp(text, "SCREEN_SIMULATION_PARAMETERS") == 0) {
+        *screen_id = SCREEN_SIMULATION_PARAMETERS;
+        return true;
+    }
+
+    if (strcmp(text, "SCREEN_GPS_STATUS") == 0) {
+        *screen_id = SCREEN_GPS_STATUS;
         return true;
     }
 

@@ -25,9 +25,11 @@ typedef struct {
 } app_state_t;
 
 typedef void (*app_state_write_fn_t)(app_state_t *state, void *ctx);
+typedef void (*app_state_read_fn_t)(const app_state_t *state, void *ctx);
 
 void app_state_init(void);
 void app_state_get_snapshot(app_state_t *snapshot);
+void app_state_read(app_state_read_fn_t read_fn, void *ctx);
 void app_state_write(app_state_write_fn_t write_fn, void *ctx);
 int64_t app_state_now_ms(void);
 
@@ -40,6 +42,7 @@ const char *app_state_json_operation_status_to_string(json_operation_status_code
 const char *app_state_wifi_mode_to_string(app_wifi_mode_t mode);
 
 bool app_state_parse_gps_source(const char *text, gps_source_t *source);
+bool app_state_parse_screen_id(const char *text, ui_screen_id_t *screen_id);
 bool app_state_parse_simulator_command(const char *text, simulator_command_t *command);
 
 #endif
