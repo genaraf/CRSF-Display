@@ -5,12 +5,15 @@ idf_component_register(
         "app_state.c"
         "crsf/crsf_rx.c"
         "crsf/crsf_tx.c"
+        "display/display.c"
         "gps/gps_input.c"
+        "input/buttons.c"
         "sdcard/sdcard_json.c"
         "simulator/simulator.c"
         "storage/storage.c"
         "telemetry/telemetry_manager.c"
         "ui/ui.c"
+        "ui/ui_lvgl.c"
         "web/web_ui.c"
         "wifi/wifi_manager.c"
     INCLUDE_DIRS
@@ -22,9 +25,14 @@ idf_component_register(
         esp_wifi
         esp_event
         esp_driver_spi
+        esp_driver_gpio
+        esp_lcd
+        esp_timer
         json
         nvs_flash
         sdmmc
+        lvgl
+        esp_lcd_ili9341
 )
 
 target_link_libraries(${COMPONENT_LIB} PRIVATE m)

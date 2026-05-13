@@ -17,10 +17,6 @@
 #include "telemetry/telemetry_manager.h"
 #include "wifi/wifi_manager.h"
 
-#ifndef HTTP_PATCH
-#define HTTP_PATCH HTTP_POST
-#endif
-
 static const char *TAG = "web_ui";
 static httpd_handle_t s_http_server;
 
@@ -426,6 +422,7 @@ static cJSON *json_create_system_state(const app_state_t *state)
     cJSON_AddItemToObject(root, "channels", json_create_channels(state));
     cJSON_AddItemToObject(root, "link_statistics", json_create_link_statistics(state));
     cJSON_AddItemToObject(root, "telemetry", json_create_telemetry_overview(state));
+    cJSON_AddItemToObject(root, "manual_telemetry", json_create_manual_telemetry(state));
     cJSON_AddItemToObject(root, "simulator", json_create_simulator(state));
     cJSON_AddItemToObject(root, "gps_status", json_create_gps_status(state));
 
@@ -464,6 +461,9 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *json, int status_code)
     }
 
     httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
     httpd_resp_set_status(req, status_text);
     result = httpd_resp_sendstr(req, payload);
 
@@ -478,6 +478,15 @@ static esp_err_t send_error(httpd_req_t *req, int status_code, const char *code,
     cJSON_AddStringToObject(json, "code", code);
     cJSON_AddStringToObject(json, "message", message);
     return send_json(req, json, status_code);
+}
+
+static esp_err_t options_handler(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
 }
 
 static char *read_request_body(httpd_req_t *req)
@@ -1217,10 +1226,45 @@ static esp_err_t get_events_handler(httpd_req_t *req)
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
+static const char INDEX_HTML[] =
+"<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+"<title>CRSF Display</title><style>"
+":root{color-scheme:dark;--bg:#120f12;--screen:#08110d;--panel:#132d24;--line:#245246;--text:#f9f1db;--muted:#7ca599;--acc:#ffd36e;--cyan:#82e6d2;--bad:#ff737c;--ok:#90f0a5}"
+"*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top left,#3a211c 0,transparent 32%),linear-gradient(180deg,#100d10,#0d0c0f);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif}"
+".wrap{max-width:1180px;margin:0 auto;padding:18px}.top{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}.brand{display:flex;gap:10px;align-items:center}.dot{width:12px;height:12px;border-radius:50%;background:var(--bad);box-shadow:0 0 18px var(--bad)}.dot.ok{background:var(--ok);box-shadow:0 0 18px var(--ok)}"
+"h1{font-size:24px;margin:0;color:var(--acc)}.sub{color:var(--muted);font-size:13px}.grid{display:grid;grid-template-columns:320px 1fr;gap:14px}.lcd,.panel{border:1px solid var(--line);border-radius:18px;background:rgba(19,45,36,.28);box-shadow:inset 0 0 24px rgba(130,230,210,.07)}"
+".lcd{height:240px;padding:12px;background:var(--screen);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.lcdHead,.lcdFoot{display:flex;justify-content:space-between;color:var(--cyan);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.lcdFoot{border-top:1px solid rgba(130,230,210,.18);padding-top:7px;color:var(--muted)}"
+".channels{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0}.ch{border:1px solid rgba(130,230,210,.16);border-radius:10px;padding:5px;background:rgba(19,45,36,.45)}.ch b{display:block;color:var(--cyan);font-size:10px}.ch span{font-size:14px}.bar{height:4px;background:#24342d;border-radius:99px;overflow:hidden;margin-top:4px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),var(--acc));width:50%}"
+".panel{padding:14px}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}.tabs button,.cmd button{border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--text);border-radius:999px;padding:7px 10px}.tabs button.active{border-color:var(--acc);color:var(--acc);background:rgba(255,211,110,.12)}"
+".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}.card{border:1px solid rgba(130,230,210,.14);border-radius:14px;background:rgba(8,17,13,.55);padding:10px}.card small{display:block;color:var(--cyan);text-transform:uppercase;letter-spacing:.08em}.card strong{display:block;margin-top:4px;font-size:18px}.muted{color:var(--muted)}"
+".cmd{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}pre{white-space:pre-wrap;margin:0;font-size:12px;color:var(--muted)}@media(max-width:760px){.grid{grid-template-columns:1fr}.lcd{max-width:320px}}"
+"</style></head><body><div class=wrap><div class=top><div class=brand><div id=linkDot class=dot></div><div><h1>CRSF Display</h1><div class=sub id=status>loading...</div></div></div><div class=sub id=time></div></div>"
+"<div class=grid><div class=lcd><div class=lcdHead><span id=lcdTitle>CRSF Channels</span><span id=lcdStatus>LINK</span></div><div id=lcdBody class=channels></div><div class=lcdFoot><span>A Back</span><span>B Select</span><span>C Next</span></div></div>"
+"<main class=panel><div class=tabs id=tabs></div><div class=cards id=cards></div><div class=cmd id=cmd></div></main></div></div>"
+"<script>"
+"const screens=['SCREEN_CRSF_CHANNELS','SCREEN_LINK_STATISTICS','SCREEN_TELEMETRY_OVERVIEW','SCREEN_MANUAL_TELEMETRY','SCREEN_SIMULATION_PARAMETERS','SCREEN_GPS_STATUS'];"
+"const names={SCREEN_CRSF_CHANNELS:'Channels',SCREEN_LINK_STATISTICS:'Link',SCREEN_TELEMETRY_OVERVIEW:'Telemetry',SCREEN_MANUAL_TELEMETRY:'Manual',SCREEN_SIMULATION_PARAMETERS:'Simulator',SCREEN_GPS_STATUS:'GPS'};"
+"let state=null;async function api(p,o){let r=await fetch(p,o);if(!r.ok)throw new Error(await r.text());return r.json()}"
+"async function setScreen(s){await api('/api/v1/ui/state',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({screen_id:s})});refresh()}"
+"async function setGps(g){await api('/api/v1/telemetry/source',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gps_source:g})});refresh()}"
+"async function sim(c){await api('/api/v1/simulator/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:c})});refresh()}"
+"function card(k,v){return `<div class=card><small>${k}</small><strong>${v==null?'':v}</strong></div>`}"
+"function renderTabs(){tabs.innerHTML=screens.map(s=>`<button class='${state.ui.screen_id==s?'active':''}' onclick=\"setScreen('${s}')\">${names[s]}</button>`).join('')}"
+"function renderLcd(){lcdTitle.textContent=names[state.ui.screen_id];lcdStatus.textContent=state.crsf_link.link_up?'LINK UP':'LINK DOWN';let ch=state.channels.channels||[];lcdBody.innerHTML=ch.map(c=>{let p=Math.round(c.normalized_value*100),w=Math.max(0,Math.min(100,(p+100)/2));return `<div class=ch><b>${c.name}</b><span>${p>0?'+':''}${p}</span><div class=bar><i style='width:${w}%'></i></div></div>`}).join('')}"
+"function renderCards(){let s=state.ui.screen_id,h='';cmd.innerHTML='';if(s==='SCREEN_CRSF_CHANNELS'){h=state.channels.channels.map(c=>card(c.name,Math.round(c.normalized_value*100)+'%')).join('')}"
+"else if(s==='SCREEN_LINK_STATISTICS'){let x=state.link_statistics.statistics;h=card('Uplink LQ',x.uplink_lq_percent+'%')+card('RSSI 1','-'+x.uplink_rssi_ant1_dbm_neg+' dBm')+card('RSSI 2','-'+x.uplink_rssi_ant2_dbm_neg+' dBm')+card('SNR',x.uplink_snr_db+' dB')+card('Down LQ',x.downlink_lq_percent+'%')+card('TX Power',x.uplink_tx_power)}"
+"else if(s==='SCREEN_TELEMETRY_OVERVIEW'){let t=state.telemetry,g=t.gps;h=card('GPS Source',state.gps_source)+card('Fix',g.fix_valid?'YES':'NO')+card('Satellites',g.satellites)+card('Latitude',g.latitude.toFixed(6))+card('Longitude',g.longitude.toFixed(6))+card('Speed',g.ground_speed_kmh+' km/h')+card('Battery',t.battery.voltage_v+' V');cmd.innerHTML=['GPS_SOURCE_MANUAL','GPS_SOURCE_EXTERNAL_GPS','GPS_SOURCE_SIMULATOR'].map(g=>`<button onclick=\"setGps('${g}')\">${g.replace('GPS_SOURCE_','')}</button>`).join('')}"
+"else if(s==='SCREEN_MANUAL_TELEMETRY'){let g=state.manual_telemetry.values.gps;h=card('Manual view','Use API PATCH /api/v1/telemetry/manual')+card('Lat',g.latitude.toFixed(6))+card('Lon',g.longitude.toFixed(6))+card('Alt',g.gps_altitude_m+' m')}"
+"else if(s==='SCREEN_SIMULATION_PARAMETERS'){let x=state.simulator,p=x.parameters;h=card('State',x.state)+card('Profile',x.active_profile_name)+card('Lat',p.start_latitude.toFixed(6))+card('Lon',p.start_longitude.toFixed(6))+card('Speed',p.speed_kmh+' km/h')+card('SD',x.sdcard.mounted?'mounted':'not mounted');cmd.innerHTML=['start','pause','resume','stop','reset'].map(c=>`<button onclick=\"sim('${c}')\">${c}</button>`).join('')}"
+"else{let g=state.gps_status;h=card('Connected',g.connected?'YES':'NO')+card('Stream',g.data_stream_present?'YES':'NO')+card('Protocol',g.protocol)+card('Errors',g.parser_errors)+card('Serial',g.serial.rx_gpio+'/'+g.serial.tx_gpio)}cards.innerHTML=h}"
+"async function refresh(){try{state=await api('/api/v1/system/state');linkDot.className='dot '+(state.crsf_link.link_up?'ok':'');status.textContent=`GPS ${state.gps_source} | WiFi ${state.wifi.ready?'ready':'booting'} | Web ${state.wifi.web_ui_ready?'ready':'booting'}`;time.textContent=state.device_time_ms+' ms';renderTabs();renderLcd();renderCards()}catch(e){status.textContent=e.message}}"
+"refresh();setInterval(refresh,1000);"
+"</script></body></html>";
+
 static esp_err_t get_root_handler(httpd_req_t *req)
 {
-    httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_sendstr(req, "CRSF Display Web UI API is running");
+    httpd_resp_set_type(req, "text/html");
+    return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t web_ui_start(void)
@@ -1233,6 +1277,7 @@ esp_err_t web_ui_start(void)
     config.server_port = APP_HTTP_SERVER_PORT;
     config.max_uri_handlers = APP_HTTP_MAX_URI_HANDLERS;
     config.stack_size = APP_HTTP_SERVER_STACK_SIZE;
+    config.uri_match_fn = httpd_uri_match_wildcard;
 
     ESP_LOGI(TAG, "Starting HTTP server on port %u", config.server_port);
     esp_err_t err = httpd_start(&s_http_server, &config);
@@ -1260,6 +1305,7 @@ esp_err_t web_ui_start(void)
         {.uri = "/api/v1/simulator/profiles/load", .method = HTTP_POST, .handler = post_profile_load_handler, .user_ctx = NULL},
         {.uri = "/api/v1/simulator/profiles/save", .method = HTTP_POST, .handler = post_profile_save_handler, .user_ctx = NULL},
         {.uri = "/api/v1/gps/status", .method = HTTP_GET, .handler = get_gps_status_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/*", .method = HTTP_OPTIONS, .handler = options_handler, .user_ctx = NULL},
     };
 
     for (size_t i = 0; i < (sizeof(handlers) / sizeof(handlers[0])); ++i) {

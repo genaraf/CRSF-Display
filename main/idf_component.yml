@@ -1,0 +1,6 @@
+## CRSF-Display managed components
+dependencies:
+  idf:
+    version: ">=5.1"
+  lvgl/lvgl: "~9.2.0"
+  espressif/esp_lcd_ili9341: "~2.0.0"

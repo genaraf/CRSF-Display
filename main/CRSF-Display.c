@@ -5,16 +5,19 @@
 #include <string.h>
 #include "crsf/crsf_rx.h"
 #include "crsf/crsf_tx.h"
+#include "display/display.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gps/gps_input.h"
+#include "input/buttons.h"
 #include "nvs_flash.h"
 #include "sdcard/sdcard_json.h"
 #include "simulator/simulator.h"
 #include "storage/storage.h"
 #include "ui/ui.h"
+#include "ui/ui_lvgl.h"
 #include "web/web_ui.h"
 #include "wifi/wifi_manager.h"
 
@@ -90,6 +93,13 @@ static void bootstrap_task(void *arg)
     err = storage_load_runtime_state();
     log_start_result("storage_load", err);
 
+    err = display_init();
+    log_start_result("display", err);
+    if (err == ESP_OK) {
+        err = ui_lvgl_init();
+        log_start_result("ui_lvgl", err);
+    }
+
     load_initial_simulator_profile();
 
     err = wifi_manager_start();
@@ -97,6 +107,9 @@ static void bootstrap_task(void *arg)
 
     err = web_ui_start();
     log_start_result("web_ui", err);
+
+    err = buttons_start();
+    log_start_result("buttons", err);
 
     err = ui_start();
     log_start_result("ui", err);

@@ -1,0 +1,30 @@
+# CRSF-Display project defaults.
+# These values are merged into sdkconfig during `idf.py reconfigure` and
+# control behaviour that must NOT silently revert when sdkconfig is wiped.
+
+# --- Target ---
+CONFIG_IDF_TARGET="esp32"
+
+# --- Partition table: default 1MB app slot is too small for LVGL.
+#     SINGLE_APP_LARGE gives ~1.5MB on a 4MB flash. ---
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# --- FAT filesystem (required for long-named profile JSON files on SDCard) ---
+CONFIG_FATFS_LFN_STACK=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_ANSI_OEM=y
+
+# --- LVGL ---
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_DEFAULT_MONTSERRAT_14=y
+CONFIG_LV_USE_LABEL=y
+CONFIG_LV_USE_BAR=y
+CONFIG_LV_USE_BUTTON=y
+CONFIG_LV_USE_FLEX=y
+CONFIG_LV_USE_GRID=y
+CONFIG_LV_MEM_SIZE_KILOBYTES=48
+# Save flash: examples are not used in firmware.
+CONFIG_LV_BUILD_EXAMPLES=n
